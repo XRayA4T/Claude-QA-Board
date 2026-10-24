@@ -128,6 +128,31 @@ $EDITOR config/server.env config/envs/webapp.env
 bash scripts/setup-environment.sh --env webapp
 ```
 
+## Tell Claude Code how to use the board
+
+The board's MCP server explains its tools to Claude. A few lines in the project's `CLAUDE.md` make
+the behaviour consistent: answer what's waiting, ask people instead of guessing, file reports in
+the document store, and flag sign-ins.
+
+```markdown
+## Team QA board
+You are `dev-claude` on the team's QA board (MCP server `qaboard`).
+- When a prompt starts with "[QA board] New for you", read the question (get_question), do what it
+  asks, answer it (answer_question), then carry on with what you were doing.
+- Ask the team on the board instead of guessing when you need a decision, approval, access or
+  information only a person has. Address it to a specific person with `to`; `anyone` only if told to.
+- Answers should stand on their own: what you found, what you changed, how it was tested, what's open.
+- Resolve your own questions once answered.
+- Put reports, logs and screenshots in the document store (upload_document, or curl to /api/docs).
+- If you are blocked on a person (a sign-in, a device code, an approval), call needs_attention with
+  the link and code; call attention_cleared when it's done.
+- Never put secrets in questions, answers or documents.
+```
+
+The complete version, with sections for AWS and GitHub, is in
+[`docs/CLAUDE.md.example`](docs/CLAUDE.md.example). See also [AWS](docs/aws.md) and
+[GitHub](docs/github.md).
+
 ## Requirements
 
 - **Server:** Linux with Docker, tmux, cron (with `flock`) and python3. You also need an ordinary account in the

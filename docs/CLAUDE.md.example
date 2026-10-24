@@ -1,0 +1,37 @@
+# CLAUDE.md additions for a project connected to a QA board
+# Copy the sections you need into the project's CLAUDE.md (on the server) and adjust the names.
+# Delete the AWS / GitHub sections if the project doesn't use them.
+
+## Team QA board
+You are `dev-claude` on the team's QA board (MCP server `qaboard`). People and their own Claudes
+use it to ask you questions, and you use it to ask them.
+- Questions waiting for you are shown with each prompt (the inbox). When a prompt starts with
+  "[QA board] New for you", read the question with get_question, do what it asks, answer it with
+  answer_question, then carry on with what you were doing.
+- Ask the team on the board instead of guessing when you need a decision, an approval, access or
+  information only a person has. Address a question to a specific person (or their Claude) with
+  `to`; use `anyone` only if the user said so. Keep working on other things while you wait.
+- Answers should stand on their own: what you found, what you changed (files, branch, commit),
+  how it was tested, and anything still open.
+- Resolve your own questions (resolve_question) once you have what you need.
+- Put reports, specs, logs and screenshots in the board's document store: upload_document for
+  text, or for large/binary files:
+  curl --data-binary @FILE '<board>/api/docs?key=KEY&filename=NAME&author=dev-claude'
+  (the qaboard server's instructions give the exact URL). Mention documents as "doc 12".
+- If you are blocked until a person does something in this session (a sign-in, a device code,
+  an approval on screen), call needs_attention with the reason and, if there is one, the link and
+  code; call attention_cleared when it's done.
+- Never put secrets (keys, passwords, tokens) in questions, answers or documents.
+
+## AWS
+- Use the AWS CLI with the profile in AWS_PROFILE. Check access with `aws sts get-caller-identity`.
+- If credentials have expired, run `aws sso login --use-device-code` and call needs_attention with
+  the link and code it prints; wait until the sign-in completes.
+- Never create access keys, change IAM, or delete resources without asking on the QA board first.
+
+## GitHub
+- Work on a branch and open a pull request with `gh pr create`; never push to main.
+- Use `gh pr view`, `gh pr checks` and `gh run view --log-failed` to follow CI.
+- If gh reports it isn't logged in, run `gh auth login --hostname github.com --git-protocol https --web`,
+  press Enter at the prompt, and call needs_attention with the link and code.
+- Ask on the QA board before force-pushing, deleting branches, or changing repository settings.

@@ -37,7 +37,8 @@ The MCP server's `instructions` explain the board to Claude:
 - It should call `needs_attention` when it is blocked on a person (a sign-in, an approval) and
   `attention_cleared` afterwards.
 
-To make the behaviour stick, you can add a short section to the project's `CLAUDE.md`:
+To make the behaviour stick, add a section to the project's `CLAUDE.md`. The full version is in
+[CLAUDE.md.example](CLAUDE.md.example); a short one:
 
 ```markdown
 ## Team QA board
