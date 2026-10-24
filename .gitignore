@@ -1,0 +1,10 @@
+# your own settings and secrets
+config/server.env
+config/envs/*.env
+config/keys/
+# local board data
+*.db
+*.db-journal
+data/
+__pycache__/
+*.pyc
