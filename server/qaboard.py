@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.9.6"
+VERSION = "1.9.7"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -1218,6 +1218,12 @@ details.new summary{cursor:pointer;font-weight:600}
 .md>:last-child{margin-bottom:0}
 .md a{overflow-wrap:anywhere}
 .ans{border-left:3px solid var(--line);padding:4px 0 4px 12px;margin-top:12px}
+.ans.folded{cursor:pointer;margin-top:6px;padding:2px 0 2px 12px}
+.ans.folded .meta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ans.folded:hover{border-left-color:var(--accent)}
+.ans.folded .peek{color:var(--fg);opacity:.75;margin-left:4px}
+.ans .chev{display:inline-block;width:12px;text-decoration:none;color:var(--muted)}
+.foldbar{font-size:13px;color:var(--muted);margin-top:10px}
 .empty{color:var(--muted);text-align:center;padding:30px}
 .err{color:var(--open);font-size:14px}
 .ok{color:var(--ans);font-size:14px}
@@ -1530,6 +1536,10 @@ addEventListener('resize',()=>{if(!$('#termwin').hidden&&!$('#termwin').classLis
 
 // ---- questions
 let filter=store('qa-filter')||'unresolved';const expanded=new Set();
+// Long threads: only the latest SHOW_LAST answers are open; earlier ones fold to a one-line preview.
+const SHOW_LAST=2,openAns=new Set(),closedAns=new Set();
+function peek(t){t=String(t||'').replace(/!\[([^\]]*)\]\([^)]*\)/g,'[image: $1]').replace(/\[([^\]]+)\]\([^)]*\)/g,'$1')
+ .replace(/```[\s\S]*?(```|$)/g,' [code] ').replace(/^\s*#+\s+/gm,'').replace(/[`*]/g,'').replace(/^\s*&gt;\s?|^\s*>\s?/gm,'').replace(/\s+/g,' ').trim();return t.length>140?t.slice(0,137)+'…':t}
 const FILTERS=[['unresolved','Unresolved'],['open','Open'],['answered','Answered'],['resolved','Resolved'],['all','All']];
 function tabs(){$('#tabs').innerHTML=FILTERS.map(([k,l])=>`<button data-f="${k}" class="${k===filter?'on':''}">${l}</button>`).join('');}
 $('#tabs').onclick=e=>{const f=e.target.dataset.f;if(f){filter=f;store('qa-filter',f);tabs();load()}};
@@ -1539,7 +1549,15 @@ function card(q){const open=expanded.has(q.id);const forMe=me()&&q.status==='ope
  <div class="meta">${esc(q.author)} → ${esc(q.to)} · ${ago(q.created)} · ${q.answers.length} answer${q.answers.length===1?'':'s'}${docs.length?` · ${docs.length} document${docs.length===1?'':'s'}`:''}</div>`;
  if(open){if(q.body)h+=`<div class="body md">${md(q.body)}</div>`;
   if(docs.length)h+=`<div class="att">Attached: ${docs.map(d=>`<a href="${url('/api/docs/'+d.id+'/view')}" target="_blank" rel="noopener">${esc(d.title)}</a>`).join('')}</div>`;
-  for(const a of q.answers)h+=`<div class="ans"><div class="meta">${esc(a.author)} · ${ago(a.created)}</div><div class="body md" style="margin-top:4px">${md(a.body)}</div></div>`;
+  const n=q.answers.length,early=a=>q.answers.indexOf(a)<n-SHOW_LAST;
+  const folded=q.answers.filter(a=>early(a)?!openAns.has(a.id):closedAns.has(a.id));
+  const bar=[];
+  if(folded.length>1)bar.push(`${folded.length} replies folded · <a href="#" data-unfoldall="${q.id}">show all</a>`);
+  if(q.answers.some(a=>early(a)&&!folded.includes(a)))bar.push(`<a href="#" data-foldall="${q.id}">fold earlier replies</a>`);
+  if(bar.length)h+=`<div class="foldbar">${bar.join(' · ')}</div>`;
+  for(const a of q.answers){
+   if(folded.includes(a))h+=`<div class="ans folded" data-unfold="${a.id}" title="Show this reply"><div class="meta"><span class="chev">▸</span> ${esc(a.author)} · ${ago(a.created)} <span class="peek">${esc(peek(a.body))}</span></div></div>`;
+   else h+=`<div class="ans"><div class="meta"><a href="#" class="chev" data-fold="${a.id}" title="Fold this reply">▾</a> ${esc(a.author)} · ${ago(a.created)}</div><div class="body md" style="margin-top:4px">${md(a.body)}</div></div>`}
   h+=`<div class="row"><textarea data-draft="${q.id}" placeholder="Write an answer"></textarea></div>
   <div class="row" style="justify-content:flex-end"><button data-attach="${q.id}" style="flex:0 0 auto">Attach file</button><button class="primary" data-answer="${q.id}" style="flex:0 0 auto">Answer</button>
   ${q.status==='resolved'?`<button data-status="${q.id}:open" style="flex:0 0 auto">Reopen</button>`:`<button data-status="${q.id}:resolved" style="flex:0 0 auto">Mark resolved</button>`}</div>`}
@@ -1600,15 +1618,22 @@ async function load(){
  const drafts={};document.querySelectorAll('[data-draft]').forEach(t=>{if(t.value)drafts[t.dataset.draft]=t.value});
  try{const [{questions},{people}]=await Promise.all([api('/api/questions?status='+filter),api('/api/people')]);
   $('#people').innerHTML=people.map(p=>`<option value="${esc(p)}">`).join('');
+  QUESTIONS=questions;
   $('#list').innerHTML=questions.length?questions.map(card).join(''):'<div class="empty">No questions here.</div>';
   for(const[id,v]of Object.entries(drafts)){const t=document.querySelector(`[data-draft="${id}"]`);if(t)t.value=v}
   if(refocus){const t=document.querySelector(`[data-draft="${refocus}"]`);if(t)t.focus()}
   const n=questions.filter(q=>q.status==='open').length;document.title=(n?'('+n+') ':'')+BRAND+' · Q&A Board';
  }catch(e){$('#list').innerHTML=`<div class="empty err">Could not reach the board: ${esc(e.message)}</div>`}}
-let attachTo=null,lastActivity=0;
+let attachTo=null,lastActivity=0,QUESTIONS=[];
 ['focusin','input','keydown'].forEach(ev=>$('#list').addEventListener(ev,()=>{lastActivity=Date.now()}));
 $('#list').onclick=async e=>{const t=e.target;
  if(t.dataset.toggle){const id=+t.dataset.toggle;expanded.has(id)?expanded.delete(id):expanded.add(id);load();return}
+ const uf=t.closest&&t.closest('[data-unfold]');
+ if(uf&&!t.closest('a[href]:not([data-unfold])')){const id=+uf.dataset.unfold;openAns.add(id);closedAns.delete(id);load();return}
+ if(t.dataset.fold){e.preventDefault();const id=+t.dataset.fold;openAns.delete(id);closedAns.add(id);load();return}
+ if(t.dataset.unfoldall||t.dataset.foldall){e.preventDefault();const q=QUESTIONS.find(x=>x.id===+(t.dataset.unfoldall||t.dataset.foldall));
+  if(q)for(const a of q.answers){if(t.dataset.unfoldall){openAns.add(a.id);closedAns.delete(a.id)}else{openAns.delete(a.id);if(q.answers.indexOf(a)>=q.answers.length-SHOW_LAST)closedAns.delete(a.id)}}
+  load();return}
  if(!me()){alertBox('Choose who you are next to "I am" first.');return}
  if(t.dataset.attach){attachTo=+t.dataset.attach;$('#verfile').dataset.mode='attach';$('#verfile').click();return}
  if(t.dataset.answer){const ta=document.querySelector(`[data-draft="${t.dataset.answer}"]`);if(!ta.value.trim())return;
