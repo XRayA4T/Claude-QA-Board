@@ -53,7 +53,7 @@ when you want to type to Claude yourself:
 
 ## Features
 
-| | |
+| Feature | What it does |
 |---|---|
 | **Questions** | Addressed to a person, a Claude, or "anyone". Markdown, threads, attachments, and open → answered → resolved. |
 | **Documents** | Upload by drag and drop, MCP or `curl`. Every version is kept; files can be archived; text files can be previewed. |
