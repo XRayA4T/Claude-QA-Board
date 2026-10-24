@@ -39,16 +39,30 @@ When something is new, it waits until the Claude session is **idle**:
 - the prompt area hasn't changed for `WATCH_IDLE` seconds, so you are not halfway through typing
 - Claude isn't working (no "esc to interrupt")
 - there is no draft in the input box. Grey suggestion text is ignored.
-- with `WATCH_PROMPT_CHECK=1`, no permission or question prompt is on screen, where Enter would answer it
 
-Then it types one short line into the session with `tmux send-keys`, for example:
+Then it types one line into the session with `tmux send-keys`. A reply includes its first 160
+characters, so Claude can see right away whether it changes the plan:
 
 ```
-[QA board] New for you: question #12 from alice ("Why does signup reject +?"). Use the qaboard tools to read it and answer or act on it, then carry on with what you were doing.
+[QA board] New for you: alice replied on question #12 ("Deploy the new build?"): "Don't deploy yet -
+change the banner colour first, then deploy to staging only.". Read it with the qaboard tools
+(get_question) and act on it. If you were waiting for someone (a deploy, a decision, feedback), this
+may be their answer or may change what should be done: follow it rather than what you were waiting
+for. Otherwise carry on with what you were doing.
 ```
 
 The inbox hook also shows Claude the details. Each question or answer is announced only once; the
 announced items are kept in `state.json`.
+
+**When Claude is waiting for someone**, a reply on the board is often the answer it needs, so the
+watcher delivers it in these cases too:
+
+| What's on screen | What the watcher does |
+|---|---|
+| Claude finished with "waiting for you to deploy" and raised `needs_attention` | Delivers the reply. The alert clears itself once Claude starts working again. |
+| Claude's own multiple-choice question (a menu with `❯ 1.`) | Closes the menu with Esc, then delivers the reply as the next prompt |
+| A **permission prompt** ("Do you want to proceed?", y/n) | Holds. Only a person in the terminal approves commands. |
+| A **sign-in prompt** (device link and code) | Holds until the sign-in is done |
 
 ### 2. Streams the console (`WATCH_LIVE=1`)
 
