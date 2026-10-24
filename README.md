@@ -31,6 +31,26 @@ QA Board gives everyone one shared inbox:
 It is deliberately small. The board is a single Python file that uses only the standard library and
 SQLite, with no build step and no dependencies. It runs in a 50 MB container.
 
+## Screenshots
+
+**Live view.** A read-only mirror of the Claude Code console on the server, streamed by the watcher:
+
+![Live view](docs/images/live.png)
+
+**Mini console.** It sits in the header on every tab. The LED flashes green when the console changes,
+and the border turns red when Claude needs a person:
+
+![Mini console](docs/images/mini-console.png)
+
+**Needs you.** Claude is waiting for a sign-in. Open the link, check the code and approve:
+
+![Attention banner](docs/images/attention.png)
+
+**Web terminal.** Claude Code's tmux session (ttyd), opened in a floating window over the board,
+when you want to type to Claude yourself:
+
+![Web terminal](docs/images/terminal.png)
+
 ## Features
 
 | | |

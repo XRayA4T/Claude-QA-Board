@@ -19,6 +19,8 @@ board. You can drag, resize and maximise it. Esc is passed through to Claude, so
 the window. The window loads the board's `--terminal-url`, which by default is the tunnel address.
 Each viewer can change it with the link next to the button.
 
+![The web terminal in its floating window](images/terminal.png)
+
 ## The watcher
 
 `watcher/board-watch.py` runs on the server, one per environment, installed by
@@ -56,6 +58,10 @@ Every 2 s it captures the tmux pane, with colours, and posts it to `/api/live`. 
 - in the **mini console** in the header. Its LED flashes green for a quarter of a second whenever the
   console changes, so you can see Claude working from any tab.
 
+![Live view](images/live.png)
+
+![Mini console](images/mini-console.png)
+
 > Everyone with the board key can see whatever the console shows. Leave `WATCH_LIVE=0` if that
 > includes anything sensitive.
 
@@ -74,6 +80,8 @@ While it is set, the Live tab shows a red banner with **Open link**, the **code*
 button, and **Mark as handled**. The mini console's border pulses red on every tab. The watcher
 clears the alert when it sees a sign-in success message, or when Claude goes from idle back to
 working. If you dismiss an alert, the watcher remembers that and doesn't raise the same one again.
+
+![Attention banner](images/attention.png)
 
 ### Config
 
