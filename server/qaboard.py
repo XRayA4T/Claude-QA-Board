@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.9.3"
+VERSION = "1.9.4"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -1222,7 +1222,11 @@ details.new summary{cursor:pointer;font-weight:600}
 .livebox{border-radius:10px;overflow:hidden;border:1px solid var(--line)}
 #livepre{margin:0;max-height:70vh;overflow:auto;background:#16141a;color:#e8e6ea;padding:12px 14px;
  font:12.5px/1.32 ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;white-space:pre}
-.topbar{position:sticky;top:0;z-index:20;background:var(--bg);padding-top:12px;margin-top:-12px}
+.topbar{position:fixed;top:0;left:0;right:0;margin:0 auto;max-width:880px;z-index:20;background:var(--bg);padding:12px 16px 0}
+/* the header and tabs are pinned (position:fixed, so nothing on the page can push them off the top);
+   the page starts below them: --toph is the pinned bar's measured height */
+main{padding-top:calc(var(--toph,160px) + 8px)}
+html{scroll-padding-top:calc(var(--toph,160px) + 8px)}
 .views{margin-bottom:0;background:var(--bg)}
 main>section{padding-top:14px}
 .brand{margin-right:auto}
@@ -1353,6 +1357,8 @@ a{color:var(--accent)}
 </div>
 </main>
 <script>
+// keep the page clear of the pinned header, whatever its height (brand, mini console, narrow windows)
+(()=>{const t=document.querySelector('.topbar'),set=()=>document.documentElement.style.setProperty('--toph',t.offsetHeight+'px');set();if(window.ResizeObserver)new ResizeObserver(set).observe(t);addEventListener('resize',set)})();
 const KEY=new URLSearchParams(location.search).get('key');
 const BRAND={BRAND_JSON};
 const $=s=>document.querySelector(s);
