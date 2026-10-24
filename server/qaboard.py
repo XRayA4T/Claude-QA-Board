@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.9.7"
+VERSION = "1.9.8"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -1255,6 +1255,8 @@ main>section{padding-top:14px}
 .livehead #openterm{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;height:28px;padding:0 12px;
  font-size:13px;font-weight:600;line-height:1;letter-spacing:0}
 @media (prefers-color-scheme:dark){.livehead #openterm{color:#16121b}}
+.termshade{position:fixed;inset:0;z-index:99;background:rgba(20,20,24,.55);backdrop-filter:blur(1px)}
+body.termopen{overflow:hidden}
 .termwin{position:fixed;z-index:100;display:flex;flex-direction:column;background:#202124;border-radius:10px;overflow:hidden;
  box-shadow:0 18px 50px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.08);min-width:360px;min-height:220px}
 .termwin.max{left:8px!important;top:8px!important;width:calc(100vw - 16px)!important;height:calc(100vh - 16px)!important}
@@ -1357,6 +1359,7 @@ a{color:var(--accent)}
 <input type="file" id="verfile" hidden>
 </section>
 <datalist id="people"></datalist>
+<div class="termshade" id="termshade" hidden title="Close the terminal window to use the board"></div>
 <div class="termwin" id="termwin" hidden role="dialog" aria-label="Claude Code terminal">
  <div class="termbar" id="termbar">
   <div class="termtab"><img src="/favicon.svg" alt="" width="14" height="14"><span>{BRAND_HTML} &middot; Claude Code</span></div>
@@ -1508,9 +1511,9 @@ function placeTerm(){const w=$('#termwin'),g=termGeom();
 function openTerm(){const w=$('#termwin');
  if(!termUrl()){changeTermUrl();if(!termUrl())return}
  if(w.hidden){placeTerm();$('#termframe').src=termUrl();$('#termurl').textContent=termUrl().replace(/^https?:\/\//,'');
-  $('#termnew').href=termUrl();w.hidden=false}
+  $('#termnew').href=termUrl();w.hidden=false;$('#termshade').hidden=false;document.body.classList.add('termopen')}
  $('#termframe').focus()}
-function closeTerm(){$('#termframe').src='about:blank';$('#termwin').hidden=true}
+function closeTerm(){$('#termframe').src='about:blank';$('#termwin').hidden=true;$('#termshade').hidden=true;document.body.classList.remove('termopen')}
 function changeTermUrl(){const v=prompt('Address of this board\'s Claude Code terminal (as your browser reaches it, e.g. through the SSH tunnel):',termUrl());
  if(v===null)return;const t=v.trim();
  if(t&&!/^https?:\/\/[^\s]+$/.test(t)){alert('Use an address like http://127.0.0.1:17681');return}
