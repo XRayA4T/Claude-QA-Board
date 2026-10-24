@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.9.5"
+VERSION = "1.9.6"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -52,7 +52,8 @@ EXTRA_TYPES = {".md": "text/markdown", ".yaml": "application/yaml", ".yml": "app
                ".jsx": "text/plain", ".sql": "application/sql", ".log": "text/plain",
                ".env": "text/plain", ".csv": "text/csv", ".py": "text/x-python"}
 IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-INLINE_SAFE = IMAGE_MIMES | {"application/pdf"}   # served inline; text/* is served inline as text/plain
+INLINE_SAFE = IMAGE_MIMES | {"image/svg+xml", "application/pdf"}   # served inline (under a sandbox CSP: an SVG
+#                                                                  can't run scripts); text/* is served as text/plain
 
 
 # Built-in icon: a speech bubble with a "Q" (original artwork). To use your own, put favicon.svg,
@@ -664,6 +665,8 @@ INSTRUCTIONS = (
     "Answer questions addressed to you with concrete, verified information. "
     "Put documents the team should be able to read (specs, reports, notes, screenshots) in the document store "
     "with upload_document, and link them from questions or answers as 'doc <id>'. "
+    "Posts are Markdown; to show an image (PNG, JPEG, GIF, WebP or SVG) from the document store in a post, "
+    "write ![caption](/api/docs/<id>/view) (add ?v=<n> for an older version). "
     "Whenever you stop to wait for a person in your session (a go-ahead to merge or deploy, a sign-in such as "
     "aws sso login, an approval, or an answer to a question you asked in the terminal), call needs_attention "
     "with a one-line reason so the team sees it on the board - for a sign-in, include its url and code - and "
@@ -1210,6 +1213,8 @@ details.new summary{cursor:pointer;font-weight:600}
 .md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:var(--drop);padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
 .md pre{background:var(--drop);padding:8px 10px;border-radius:8px;overflow-x:auto;margin:4px 0 8px}
 .md pre code{background:none;padding:0;white-space:pre}
+.md a.mdimg{display:block;margin:6px 0 8px;width:max-content;max-width:100%}
+.md a.mdimg img{display:block;max-width:100%;max-height:480px;border:1px solid var(--line);border-radius:8px;background:#fff}
 .md>:last-child{margin-bottom:0}
 .md a{overflow-wrap:anywhere}
 .ans{border-left:3px solid var(--line);padding:4px 0 4px 12px;margin-top:12px}
@@ -1540,16 +1545,29 @@ function card(q){const open=expanded.has(q.id);const forMe=me()&&q.status==='ope
   ${q.status==='resolved'?`<button data-status="${q.id}:open" style="flex:0 0 auto">Reopen</button>`:`<button data-status="${q.id}:resolved" style="flex:0 0 auto">Mark resolved</button>`}</div>`}
  return h+'</div>'}
 function linkDocs(html){return html.replace(/\bdoc (\d+)\b/gi,(m,id)=>`<a href="${url('/api/docs/'+id+'/view')}" target="_blank" rel="noopener">${m}</a>`)}
-// Markdown for posts (what Claude writes): **bold**, *italic*, `code`, ``` blocks, lists, # headings, links.
+// Markdown for posts (what Claude writes): **bold**, *italic*, `code`, ``` blocks, lists, # headings, links,
+// and images from the board's own document store: ![caption](/api/docs/12/view).
 // The text is HTML-escaped first, so a post can never add its own HTML.
+function docUrl(u,kind){ // a link to one of this board's documents (relative, or written for any host/port)
+ const m=String(u).replace(/&amp;/g,'&').match(/^(?:https?:\/\/[^\/\s]+)?\/api\/docs\/(\d+)\/(view|download)(?:\?(\S*))?$/);
+ if(!m)return null;
+ const v=new URLSearchParams(m[3]||'').get('v');
+ return url('/api/docs/'+m[1]+'/'+(kind||m[2])+(v&&/^\d+$/.test(v)?'?v='+v:'')).href;   // with this viewer's key
+}
 function mdInline(t){
- const codes=[];
+ const codes=[],keep=[],hold=h=>{keep.push(h);return '\u0001'+(keep.length-1)+'\u0001'};
  t=t.replace(/`([^`\n]+)`/g,(m,c)=>{codes.push(c);return '\u0000'+(codes.length-1)+'\u0000'});
- t=t.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
- t=t.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/g,'$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+ t=t.replace(/!\[([^\]\n]*)\]\(([^\s)]+)\)/g,(m,alt,src)=>{const d=docUrl(src,'view');
+  if(d)return hold(`<a class="mdimg" href="${esc(d)}" target="_blank" rel="noopener"><img src="${esc(d)}" alt="${alt}" title="${alt}" loading="lazy"></a>`);
+  return /^https?:\/\//.test(src)?hold(`<a href="${src}" target="_blank" rel="noopener">${alt||src}</a>`):m});
+ t=t.replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|\/api\/docs\/)[^\s)]+)\)/g,(m,txt,href)=>{const d=docUrl(href);
+  return hold(`<a href="${d?esc(d):href}" target="_blank" rel="noopener">${txt}</a>`)});
+ t=t.replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?])/g,(m,pre,href)=>{const d=docUrl(href);
+  return pre+hold(`<a href="${d?esc(d):href}" target="_blank" rel="noopener">${href}</a>`)});
  t=t.replace(/\*\*(?=\S)([^\n]*?\S)\*\*/g,'<strong>$1</strong>');
  t=t.replace(/(^|[^*\w])\*(?=\S)([^*\n]*?\S)\*(?![*\w])/g,'$1<em>$2</em>');
  t=linkDocs(t);
+ t=t.replace(/\u0001(\d+)\u0001/g,(m,i)=>keep[+i]);
  return t.replace(/\u0000(\d+)\u0000/g,(m,i)=>'<code>'+codes[+i]+'</code>');
 }
 function md(src){

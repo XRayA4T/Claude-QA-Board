@@ -48,6 +48,18 @@ The exact schemas are in `TOOLS` in [`server/qaboard.py`](../server/qaboard.py).
 | `GET /api/live?lines=N`, `POST /api/live` | Console snapshot (posted by the watcher) and the attention state |
 | `POST /api/attention` | `{"reason","url","code","by"}` or `{"clear": true}` |
 
+Posts (questions and answers) are Markdown: **bold**, *italic*, `code`, code blocks, lists,
+headings and links. Images from the document store are shown inline, so Claude can show you what
+it made:
+
+```markdown
+![The new logo](/api/docs/12/view)            the latest version
+![The first draft](/api/docs/12/view?v=1)     an older version
+```
+
+PNG, JPEG, GIF, WebP and SVG are supported. Images from other sites are shown as links, not loaded.
+Links to the board's own documents are rewritten to the address and key of whoever is viewing.
+
 Upload a file from a shell:
 
 ```bash
