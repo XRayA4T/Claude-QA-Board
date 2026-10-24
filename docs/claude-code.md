@@ -80,3 +80,5 @@ any browser, so the link can be opened on any computer:
 
 The watcher spots these URLs and one-time codes on screen and raises the attention banner. Whoever
 opens the board can then complete the sign-in. See [terminal-and-watcher.md](terminal-and-watcher.md).
+
+For full setup guides, see [aws.md](aws.md) and [github.md](github.md).

@@ -95,8 +95,9 @@ these guides in order:
 3. **[Web terminal, watcher and live view](docs/terminal-and-watcher.md)**: how the nudging and attention alerts work.
 4. **[Team members and Claude Desktop](docs/team-setup.md)**: the tunnel and the Claude Desktop connection.
 5. **[Branding](docs/branding.md)**: name, colour, `brand.css`, fonts and logo.
-6. **[Security](docs/security.md)**: read this before exposing anything.
-7. **[API reference](docs/api.md)**: MCP tools and REST endpoints.
+6. **[AWS](docs/aws.md)** and **[GitHub](docs/github.md)**: give Claude Code cloud and repository access, with sign-ins anyone can finish from the board.
+7. **[Security](docs/security.md)**: read this before exposing anything.
+8. **[API reference](docs/api.md)**: MCP tools and REST endpoints.
 
 In short:
 
