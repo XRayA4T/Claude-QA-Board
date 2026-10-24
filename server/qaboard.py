@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.9.4"
+VERSION = "1.9.5"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -1083,7 +1083,7 @@ def render_page(brand, accent, terminal_url=""):
     import html
     if terminal_url and not re.fullmatch(r"https?://[^\s<>\"']+", terminal_url):
         terminal_url = ""
-    return (PAGE.replace("{BRAND_HTML}", html.escape(brand))
+    return (PAGE.replace("{VERSION}", VERSION).replace("{BRAND_HTML}", html.escape(brand))
                 .replace("{TERM_JSON}", json.dumps(terminal_url).replace("<", "\\u003c"))
                 .replace("{BRAND_JSON}", json.dumps(brand))
                 .replace("{ACCENT_DARK}", lighten(accent))
@@ -1163,6 +1163,7 @@ h1{font-size:20px;margin:0;line-height:1.15}
 h1 span{display:block;font-size:13px;font-weight:500;color:var(--muted);letter-spacing:.02em}
 .brand{display:flex;gap:10px;align-items:center}
 .brand img{border-radius:8px;flex:0 0 auto}
+h1 .ver{font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;opacity:.75;margin-left:4px}
 header{border-top:4px solid var(--accent);padding-top:12px}
 .me{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:14px}
 input,textarea,select{font:inherit;color:var(--fg);background:var(--field);border:1px solid var(--line);
@@ -1287,7 +1288,7 @@ a{color:var(--accent)}
 </style></head>
 <body><main>
 <div class="topbar">
-<header><div class="brand"><img src="/favicon.svg" alt="" width="34" height="34"><h1>{BRAND_HTML}<span>Q&amp;A Board</span></h1></div>
+<header><div class="brand"><img src="/favicon.svg" alt="" width="34" height="34"><h1>{BRAND_HTML}<span>Q&amp;A Board <small class="ver">v{VERSION}</small></span></h1></div>
 <button class="mini" id="mini" hidden title="Claude's console - open the Live view" aria-label="Open the Live view"><pre id="minipre"></pre><span class="led"></span></button>
 <label class="me">I am <select id="me"><option value="">choose…</option></select></label></header>
 <nav class="views" id="views"><button data-v="questions">Questions</button><button data-v="docs">Documents</button><button data-v="live">Live</button><button data-v="users">Users</button></nav>
