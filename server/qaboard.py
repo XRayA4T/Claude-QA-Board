@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.9.8"
+VERSION = "1.9.9"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -1159,31 +1159,31 @@ PAGE = r"""<!doctype html>
 @media (prefers-color-scheme:dark){:root{--bg:#151514;--card:#1f1f1d;--fg:#ececE8;--muted:#9a9a93;
 --line:#34342f;--accent:{ACCENT_DARK};--open:#fb923c;--ans:#4ade80;--res:#9ca3af;--field:#191917;--drop:#23253a}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,Ubuntu,sans-serif}
-main{max-width:880px;margin:0 auto;padding:20px 16px 60px}
+body{margin:0;background:var(--bg);color:var(--fg);font:18px/1.5 system-ui,-apple-system,Segoe UI,Ubuntu,sans-serif}
+main{max-width:1320px;margin:0 auto;padding:20px 16px 60px}
 header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}
-h1{font-size:20px;margin:0;line-height:1.15}
-h1 span{display:block;font-size:13px;font-weight:500;color:var(--muted);letter-spacing:.02em}
+h1{font-size:24px;margin:0;line-height:1.15}
+h1 span{display:block;font-size:15.6px;font-weight:500;color:var(--muted);letter-spacing:.02em}
 .brand{display:flex;gap:10px;align-items:center}
 .brand img{border-radius:8px;flex:0 0 auto}
-h1 .ver{font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;opacity:.75;margin-left:4px}
+h1 .ver{font-size:13.2px;font-weight:500;letter-spacing:0;text-transform:none;opacity:.75;margin-left:4px}
 header{border-top:4px solid var(--accent);padding-top:12px}
-.me{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:14px}
+.me{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:16.8px}
 input,textarea,select{font:inherit;color:var(--fg);background:var(--field);border:1px solid var(--line);
 border-radius:8px;padding:8px 10px;width:100%}
 textarea{min-height:80px;resize:vertical}
 .me input,.me select{width:160px;padding:5px 8px}
 .forwhom{align-items:center}.forlabel{flex:0 0 auto!important}
 .topills{display:flex;flex-wrap:wrap;gap:6px;flex:1 1 300px}
-.topill{border-radius:99px;padding:4px 12px;font-size:14px}
+.topill{border-radius:99px;padding:4px 12px;font-size:16.8px}
 .topill.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.topill .cl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:var(--drop);color:var(--accent);border-radius:99px;padding:1px 6px;margin-right:6px;vertical-align:1px}
+.topill .cl{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:var(--drop);color:var(--accent);border-radius:99px;padding:1px 6px;margin-right:6px;vertical-align:1px}
 .topill.on .cl{background:rgba(255,255,255,.25);color:#fff}
 .topill.any{border-style:dashed}
 .urow{display:flex;align-items:center;gap:12px}.urow .main{flex:1;min-width:0}
 .av{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-weight:700;background:var(--drop);color:var(--accent);flex:0 0 auto}
-.av.cl{background:var(--accent);color:#fff;font-size:18px}
-.ubadge{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border:1px solid var(--line);border-radius:99px;padding:1px 8px;color:var(--muted);margin-left:4px}
+.av.cl{background:var(--accent);color:#fff;font-size:21.6px}
+.ubadge{font-size:13.2px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border:1px solid var(--line);border-radius:99px;padding:1px 8px;color:var(--muted);margin-left:4px}
 .ubadge.cl{border-color:var(--accent);color:var(--accent)}
 .rmuser.danger{border-color:#e5484d;color:#e5484d}
 button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:8px;
@@ -1194,13 +1194,13 @@ button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 details.new summary{cursor:pointer;font-weight:600}
 .row{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.row>*{flex:1 1 200px}
 .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:16px 0 10px}
-.tabs button{padding:4px 12px;font-size:14px}.tabs button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.tabs button{padding:4px 12px;font-size:16.8px}.tabs button.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .views{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px}
 .views button{border:0;border-bottom:3px solid transparent;border-radius:0;background:none;padding:8px 14px;font-weight:600;color:var(--muted)}
 .views button.on{color:var(--fg);border-bottom-color:var(--accent)}
-.q h3{margin:0;font-size:16px;cursor:pointer}
-.meta{color:var(--muted);font-size:13px;margin-top:2px}
-.pill{display:inline-block;font-size:12px;font-weight:600;border-radius:99px;padding:0 8px;margin-right:6px;border:1px solid}
+.q h3{margin:0;font-size:19.2px;cursor:pointer}
+.meta{color:var(--muted);font-size:15.6px;margin-top:2px}
+.pill{display:inline-block;font-size:14.4px;font-weight:600;border-radius:99px;padding:0 8px;margin-right:6px;border:1px solid}
 .open{color:var(--open)}.answered{color:var(--ans)}.resolved{color:var(--res)}
 .body{white-space:pre-wrap;margin:10px 0 0;overflow-wrap:anywhere}
 .md{white-space:normal;line-height:1.55}
@@ -1208,8 +1208,8 @@ details.new summary{cursor:pointer;font-weight:600}
 .md ul,.md ol{margin:2px 0 8px;padding-left:22px}
 .md li{margin:2px 0}
 .md li.sub{margin-left:20px;list-style-type:circle}
-.md h4{margin:12px 0 4px;font-size:15px}
-.md h4.h1{font-size:17px}
+.md h4{margin:12px 0 4px;font-size:18px}
+.md h4.h1{font-size:20.4px}
 .md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:var(--drop);padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
 .md pre{background:var(--drop);padding:8px 10px;border-radius:8px;overflow-x:auto;margin:4px 0 8px}
 .md pre code{background:none;padding:0;white-space:pre}
@@ -1223,18 +1223,18 @@ details.new summary{cursor:pointer;font-weight:600}
 .ans.folded:hover{border-left-color:var(--accent)}
 .ans.folded .peek{color:var(--fg);opacity:.75;margin-left:4px}
 .ans .chev{display:inline-block;width:12px;text-decoration:none;color:var(--muted)}
-.foldbar{font-size:13px;color:var(--muted);margin-top:10px}
+.foldbar{font-size:15.6px;color:var(--muted);margin-top:10px}
 .empty{color:var(--muted);text-align:center;padding:30px}
-.err{color:var(--open);font-size:14px}
-.ok{color:var(--ans);font-size:14px}
+.err{color:var(--open);font-size:16.8px}
+.ok{color:var(--ans);font-size:16.8px}
 .forme{outline:2px solid var(--open);outline-offset:-1px}
 .qfiles{align-items:center;gap:10px;border:1px dashed var(--line);border-radius:8px;padding:6px 10px}
 .qfiles>*{flex:0 1 auto}.qfiles.over{background:var(--drop);border-color:var(--accent)}
-.attachbtn{cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:4px 12px;background:var(--card);font-size:14px;white-space:nowrap}
+.attachbtn{cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:4px 12px;background:var(--card);font-size:16.8px;white-space:nowrap}
 .livebox{border-radius:10px;overflow:hidden;border:1px solid var(--line)}
 #livepre{margin:0;max-height:70vh;overflow:auto;background:#16141a;color:#e8e6ea;padding:12px 14px;
- font:12.5px/1.32 ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;white-space:pre}
-.topbar{position:fixed;top:0;left:0;right:0;margin:0 auto;max-width:880px;z-index:20;background:var(--bg);padding:12px 16px 0}
+ font:15px/1.32 ui-monospace,SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;white-space:pre}
+.topbar{position:fixed;top:0;left:0;right:0;margin:0 auto;max-width:1320px;z-index:20;background:var(--bg);padding:12px 16px 0}
 /* the header and tabs are pinned (position:fixed, so nothing on the page can push them off the top);
    the page starts below them: --toph is the pinned bar's measured height */
 main{padding-top:calc(var(--toph,160px) + 8px)}
@@ -1253,7 +1253,7 @@ main>section{padding-top:14px}
 #liveattn{margin-bottom:14px}
 .livehead #livestate{margin:0;line-height:28px}
 .livehead #openterm{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;height:28px;padding:0 12px;
- font-size:13px;font-weight:600;line-height:1;letter-spacing:0}
+ font-size:15.6px;font-weight:600;line-height:1;letter-spacing:0}
 @media (prefers-color-scheme:dark){.livehead #openterm{color:#16121b}}
 .termshade{position:fixed;inset:0;z-index:99;background:rgba(20,20,24,.55);backdrop-filter:blur(1px)}
 body.termopen{overflow:hidden}
@@ -1261,14 +1261,14 @@ body.termopen{overflow:hidden}
  box-shadow:0 18px 50px rgba(0,0,0,.45),0 0 0 1px rgba(255,255,255,.08);min-width:360px;min-height:220px}
 .termwin.max{left:8px!important;top:8px!important;width:calc(100vw - 16px)!important;height:calc(100vh - 16px)!important}
 .termbar{display:flex;align-items:center;gap:8px;height:38px;padding:0 6px 0 10px;background:#2b2c30;cursor:move;user-select:none;flex:0 0 auto}
-.termtab{display:flex;align-items:center;gap:7px;background:#3c3d42;color:#e8eaed;font:13px/1 system-ui,sans-serif;
+.termtab{display:flex;align-items:center;gap:7px;background:#3c3d42;color:#e8eaed;font:15.6px/1 system-ui,sans-serif;
  padding:7px 12px;border-radius:8px 8px 0 0;margin-top:8px;align-self:stretch;max-width:46%;overflow:hidden;white-space:nowrap}
 .termtab span{overflow:hidden;text-overflow:ellipsis}
-.termurl{flex:1;min-width:60px;background:#18191b;color:#bdc1c6;border:0;border-radius:99px;padding:5px 12px;font:12px/1 system-ui,sans-serif;
+.termurl{flex:1;min-width:60px;background:#18191b;color:#bdc1c6;border:0;border-radius:99px;padding:5px 12px;font:14.4px/1 system-ui,sans-serif;
  text-align:left;cursor:text;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .termbtns{display:flex;gap:2px;flex:0 0 auto}
 .termbtns a,.termbtns button{width:32px;height:28px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;
- color:#e8eaed;font:15px/1 system-ui,sans-serif;text-decoration:none;cursor:pointer;padding:0}
+ color:#e8eaed;font:18px/1 system-ui,sans-serif;text-decoration:none;cursor:pointer;padding:0}
 .termbtns a:hover,.termbtns button:hover{background:#3c3d42}
 .termbtns .x:hover{background:#e5484d;color:#fff}
 #termframe{flex:1;border:0;width:100%;background:#16141a}
@@ -1278,25 +1278,25 @@ body.termopen{overflow:hidden}
 .termwin.max .termresize{display:none}
 .attnacts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .attnlink{background:#e5484d;color:#fff!important;text-decoration:none;font-weight:600;border-radius:8px;padding:6px 12px}
-.attncode b{font-family:ui-monospace,Menlo,monospace;letter-spacing:.06em;font-size:15px;user-select:all}
-.attn{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:10px;padding:10px 12px;border-radius:8px;border:1px solid #e5484d;background:color-mix(in srgb,#e5484d 12%,var(--card));font-size:14px}
+.attncode b{font-family:ui-monospace,Menlo,monospace;letter-spacing:.06em;font-size:18px;user-select:all}
+.attn{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:10px;padding:10px 12px;border-radius:8px;border:1px solid #e5484d;background:color-mix(in srgb,#e5484d 12%,var(--card));font-size:16.8px}
 .mini{position:relative;width:210px;height:62px;padding:0;overflow:hidden;background:#16141a;border:1px solid var(--line);border-radius:8px;cursor:pointer;flex:0 0 auto}
 .mini:hover{border-color:var(--accent)}
 .mini pre{position:absolute;left:6px;right:6px;bottom:4px;margin:0;font:5.5px/1.25 ui-monospace,Menlo,monospace;color:#e8e6ea;white-space:pre;overflow:hidden;text-align:left;pointer-events:none}
 .mini .led{position:absolute;top:5px;right:5px}
 @media (max-width:640px){.mini{display:none}}
-.warnbox{margin-top:10px;border-left:3px solid var(--open);background:var(--drop);padding:10px 12px;border-radius:0 8px 8px 0;font-size:14px}
-.att{margin-top:8px;font-size:14px}.att a{margin-right:10px}
+.warnbox{margin-top:10px;border-left:3px solid var(--open);background:var(--drop);padding:10px 12px;border-radius:0 8px 8px 0;font-size:16.8px}
+.att{margin-top:8px;font-size:16.8px}.att a{margin-right:10px}
 a{color:var(--accent)}
 .drop{border:2px dashed var(--line);border-radius:12px;padding:16px;text-align:center;color:var(--muted)}
 .drop.over{background:var(--drop);border-color:var(--accent)}
 .doc{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
 .doc .main{flex:1 1 300px;min-width:0}
-.doc h3{margin:0;font-size:16px;overflow-wrap:anywhere}
+.doc h3{margin:0;font-size:19.2px;overflow-wrap:anywhere}
 .doc .acts{display:flex;gap:6px;flex-wrap:wrap}
-.doc .acts a,.doc .acts button{font-size:13px;padding:4px 10px;border:1px solid var(--line);border-radius:8px;text-decoration:none;background:var(--card);color:var(--fg)}
-.badge{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:0 6px;color:var(--muted);margin-left:6px}
-.vers{font-size:13px;color:var(--muted);margin-top:6px}
+.doc .acts a,.doc .acts button{font-size:15.6px;padding:4px 10px;border:1px solid var(--line);border-radius:8px;text-decoration:none;background:var(--card);color:var(--fg)}
+.badge{font-size:14.4px;border:1px solid var(--line);border-radius:6px;padding:0 6px;color:var(--muted);margin-left:6px}
+.vers{font-size:15.6px;color:var(--muted);margin-top:6px}
 [hidden]{display:none!important}
 </style></head>
 <body><main>
