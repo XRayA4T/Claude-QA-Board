@@ -48,8 +48,9 @@ The exact schemas are in `TOOLS` in [`server/qaboard.py`](../server/qaboard.py).
 | `GET /api/live?lines=N`, `POST /api/live` | Console snapshot (posted by the watcher) and the attention state |
 | `POST /api/attention` | `{"reason","url","code","by"}` or `{"clear": true}` |
 
-Posts (questions and answers) are Markdown: **bold**, *italic*, `code`, code blocks, lists,
-headings, links and tables (`|---|:---:|---:|` sets left, centre and right alignment). Images from the document store are shown inline, so Claude can show you what
+Posts (questions and answers) are Markdown: **bold** / __bold__, *italic* / _italic_, ~~strikethrough~~,
+`code`, code blocks, lists and task lists (`- [ ]`, `- [x]`), headings, > block quotes, horizontal
+rules (`---`), links, `\` escapes and tables (`|---|:---:|---:|` sets left, centre and right alignment). Images from the document store are shown inline, so Claude can show you what
 it made:
 
 ```markdown

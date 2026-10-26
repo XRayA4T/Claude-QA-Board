@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.10.0"
+VERSION = "1.11.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -1209,6 +1209,13 @@ details.new summary{cursor:pointer;font-weight:600}
 .md li{margin:2px 0}
 .md li.sub{margin-left:20px;list-style-type:circle}
 .md h4{margin:12px 0 4px;font-size:18px}
+.md h4.h5,.md h4.h6{font-size:16.8px;color:var(--muted)}
+.md blockquote{margin:4px 0 10px;padding:2px 0 2px 12px;border-left:3px solid var(--accent);color:var(--muted)}
+.md blockquote p:last-child{margin-bottom:0}
+.md hr{border:0;border-top:1px solid var(--line);margin:12px 0}
+.md del{opacity:.7}
+.md li.task{list-style:none;margin-left:-18px}
+.md li.task input{width:auto;height:auto;min-height:0;padding:0;border:0;display:inline-block;margin:0 6px 0 0;vertical-align:-1px;accent-color:var(--accent)}
 .md h4.h1{font-size:20.4px}
 .md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:var(--drop);padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
 .md pre{background:var(--drop);padding:8px 10px;border-radius:8px;overflow-x:auto;margin:4px 0 8px}
@@ -1583,6 +1590,7 @@ function docUrl(u,kind){ // a link to one of this board's documents (relative, o
 function mdInline(t){
  const codes=[],keep=[],hold=h=>{keep.push(h);return '\u0001'+(keep.length-1)+'\u0001'};
  t=t.replace(/`([^`\n]+)`/g,(m,c)=>{codes.push(c);return '\u0000'+(codes.length-1)+'\u0000'});
+ t=t.replace(/\\([\\`*_~#|[\]()!-])/g,(m,c)=>hold(c));   // \* \_ \~ ... show the character itself
  t=t.replace(/!\[([^\]\n]*)\]\(([^\s)]+)\)/g,(m,alt,src)=>{const d=docUrl(src,'view');
   if(d)return hold(`<a class="mdimg" href="${esc(d)}" target="_blank" rel="noopener"><img src="${esc(d)}" alt="${alt}" title="${alt}" loading="lazy"></a>`);
   return /^https?:\/\//.test(src)?hold(`<a href="${src}" target="_blank" rel="noopener">${alt||src}</a>`):m});
@@ -1592,6 +1600,9 @@ function mdInline(t){
   return pre+hold(`<a href="${d?esc(d):href}" target="_blank" rel="noopener">${href}</a>`)});
  t=t.replace(/\*\*(?=\S)([^\n]*?\S)\*\*/g,'<strong>$1</strong>');
  t=t.replace(/(^|[^*\w])\*(?=\S)([^*\n]*?\S)\*(?![*\w])/g,'$1<em>$2</em>');
+ t=t.replace(/(^|[^_\w])__(?=\S)([^\n]*?\S)__(?![_\w])/g,'$1<strong>$2</strong>');
+ t=t.replace(/(^|[^_\w])_(?=\S)([^_\n]*?\S)_(?![_\w])/g,'$1<em>$2</em>');   // not inside snake_case words
+ t=t.replace(/~~(?=\S)([^\n]*?\S)~~/g,'<del>$1</del>');
  t=linkDocs(t);
  t=t.replace(/\u0001(\d+)\u0001/g,(m,i)=>keep[+i]);
  return t.replace(/\u0000(\d+)\u0000/g,(m,i)=>'<code>'+codes[+i]+'</code>');
@@ -1608,12 +1619,14 @@ function cells(row){ // split a table row on | (not inside `code`, not \|), with
  if(row.startsWith('|'))out.shift();
  if(row.endsWith('|')&&!row.endsWith('\\|'))out.pop();
  return out}
-function md(src){
+function md(src){return mdLines(esc(src||'').split('\n'))}
+function mdLines(lines){ // lines are already HTML-escaped
  const out=[];let para=[],list=null,code=null;
  const flushP=()=>{if(para.length){out.push('<p>'+para.map(mdInline).join('<br>')+'</p>');para=[]}};
  const flushL=()=>{if(list){out.push((list.t==='ol'&&list.start!=='1'?`<ol start="${list.start}">`:`<${list.t}>`)+
-   list.items.map(i=>`<li${i.sub?' class="sub"':''}>${mdInline(i.text)}</li>`).join('')+`</${list.t}>`);list=null}};
- const lines=esc(src||'').split('\n');
+   list.items.map(i=>{const t=i.text.match(/^\[([ xX])\]\s+(.*)$/);   // task list: - [ ] todo / - [x] done
+    return t?`<li class="task${i.sub?' sub':''}"><input type="checkbox" disabled${t[1]===' '?'':' checked'}> ${mdInline(t[2])}</li>`
+     :`<li${i.sub?' class="sub"':''}>${mdInline(i.text)}</li>`}).join('')+`</${list.t}>`);list=null}};
  for(let li=0;li<lines.length;li++){const line=lines[li];
   if(code!==null){if(/^\s*```/.test(line)){out.push('<pre><code>'+code.join('\n')+'</code></pre>');code=null}else code.push(line);continue}
   let m;
@@ -1626,7 +1639,12 @@ function md(src){
     rows.map(r=>'<tr>'+head.map((_,i)=>td('td',r[i],i)).join('')+'</tr>').join('')+'</tbody></table></div>');
   }
   else if(/^\s*```/.test(line)){flushP();flushL();code=[]}
-  else if((m=line.match(/^\s{0,3}(#{1,4})\s+(.*)$/))){flushP();flushL();out.push('<h4 class="h'+m[1].length+'">'+mdInline(m[2])+'</h4>')}
+  else if(/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)){flushP();flushL();out.push('<hr>')}   // --- *** ___
+  else if(/^\s{0,3}&gt;/.test(line)){   // > block quote (consecutive lines; nests: >>)
+   flushP();flushL();const q=[];
+   while(li<lines.length&&/^\s{0,3}&gt;/.test(lines[li]))q.push(lines[li++].replace(/^\s{0,3}&gt;\s?/,''));li--;
+   out.push('<blockquote>'+mdLines(q)+'</blockquote>')}
+  else if((m=line.match(/^\s{0,3}(#{1,6})\s+(.*)$/))){flushP();flushL();out.push('<h4 class="h'+m[1].length+'">'+mdInline(m[2])+'</h4>')}
   else if((m=line.match(/^(\s*)[-*•]\s+(.*)$/))){flushP();if(!list||list.t!=='ul'){flushL();list={t:'ul',items:[]}}list.items.push({text:m[2],sub:m[1].length>=2})}
   else if((m=line.match(/^(\s*)(\d+)[.)]\s+(.*)$/))){flushP();if(!list||list.t!=='ol'){flushL();list={t:'ol',items:[],start:m[2]}}list.items.push({text:m[3],sub:m[1].length>=2})}
   else if(/^\s*$/.test(line)){flushP();flushL()}
