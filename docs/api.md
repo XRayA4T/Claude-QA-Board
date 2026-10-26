@@ -49,7 +49,7 @@ The exact schemas are in `TOOLS` in [`server/qaboard.py`](../server/qaboard.py).
 | `POST /api/attention` | `{"reason","url","code","by"}` or `{"clear": true}` |
 
 Posts (questions and answers) are Markdown: **bold**, *italic*, `code`, code blocks, lists,
-headings and links. Images from the document store are shown inline, so Claude can show you what
+headings, links and tables (`|---|:---:|---:|` sets left, centre and right alignment). Images from the document store are shown inline, so Claude can show you what
 it made:
 
 ```markdown

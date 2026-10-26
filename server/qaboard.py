@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.9.9"
+VERSION = "1.10.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -1213,6 +1213,11 @@ details.new summary{cursor:pointer;font-weight:600}
 .md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:var(--drop);padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
 .md pre{background:var(--drop);padding:8px 10px;border-radius:8px;overflow-x:auto;margin:4px 0 8px}
 .md pre code{background:none;padding:0;white-space:pre}
+.md .mdtable{overflow-x:auto;margin:4px 0 10px;max-width:100%}
+.md table{border-collapse:collapse;font-size:.95em;font-variant-numeric:tabular-nums}
+.md th,.md td{border:1px solid var(--line);padding:5px 10px;text-align:left;vertical-align:top}
+.md th{background:var(--drop);font-weight:600}
+.md tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--drop) 40%,transparent)}
 .md a.mdimg{display:block;margin:6px 0 8px;width:max-content;max-width:100%}
 .md a.mdimg img{display:block;max-width:100%;max-height:480px;border:1px solid var(--line);border-radius:8px;background:#fff}
 .md>:last-child{margin-bottom:0}
@@ -1591,15 +1596,36 @@ function mdInline(t){
  t=t.replace(/\u0001(\d+)\u0001/g,(m,i)=>keep[+i]);
  return t.replace(/\u0000(\d+)\u0000/g,(m,i)=>'<code>'+codes[+i]+'</code>');
 }
+const TABLE_SEP=/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/;
+function cells(row){ // split a table row on | (not inside `code`, not \|), without the outer pipes
+ const out=[];let cur='',tick=false;row=row.trim();
+ for(let i=0;i<row.length;i++){const ch=row[i];
+  if(ch==='\\'&&row[i+1]==='|'){cur+='|';i++;continue}
+  if(ch==='`')tick=!tick;
+  if(ch==='|'&&!tick){out.push(cur.trim());cur='';continue}
+  cur+=ch}
+ out.push(cur.trim());
+ if(row.startsWith('|'))out.shift();
+ if(row.endsWith('|')&&!row.endsWith('\\|'))out.pop();
+ return out}
 function md(src){
  const out=[];let para=[],list=null,code=null;
  const flushP=()=>{if(para.length){out.push('<p>'+para.map(mdInline).join('<br>')+'</p>');para=[]}};
  const flushL=()=>{if(list){out.push((list.t==='ol'&&list.start!=='1'?`<ol start="${list.start}">`:`<${list.t}>`)+
    list.items.map(i=>`<li${i.sub?' class="sub"':''}>${mdInline(i.text)}</li>`).join('')+`</${list.t}>`);list=null}};
- for(const line of esc(src||'').split('\n')){
+ const lines=esc(src||'').split('\n');
+ for(let li=0;li<lines.length;li++){const line=lines[li];
   if(code!==null){if(/^\s*```/.test(line)){out.push('<pre><code>'+code.join('\n')+'</code></pre>');code=null}else code.push(line);continue}
   let m;
-  if(/^\s*```/.test(line)){flushP();flushL();code=[]}
+  if(line.includes('|')&&li+1<lines.length&&TABLE_SEP.test(lines[li+1])&&cells(line).length>1){
+   // a table: header row, separator row (|---|:--:|), then rows until a line without a |
+   flushP();flushL();const head=cells(line),al=cells(lines[li+1]).map(c=>/^:-+:$/.test(c)?'center':/^-+:$/.test(c)?'right':'');
+   const rows=[];li+=2;while(li<lines.length&&lines[li].includes('|')&&!/^\s*$/.test(lines[li]))rows.push(cells(lines[li++]));li--;
+   const td=(t,c,i)=>`<${t}${al[i]?` style="text-align:${al[i]}"`:''}>${mdInline(c||'')}</${t}>`;
+   out.push('<div class="mdtable"><table><thead><tr>'+head.map((c,i)=>td('th',c,i)).join('')+'</tr></thead><tbody>'+
+    rows.map(r=>'<tr>'+head.map((_,i)=>td('td',r[i],i)).join('')+'</tr>').join('')+'</tbody></table></div>');
+  }
+  else if(/^\s*```/.test(line)){flushP();flushL();code=[]}
   else if((m=line.match(/^\s{0,3}(#{1,4})\s+(.*)$/))){flushP();flushL();out.push('<h4 class="h'+m[1].length+'">'+mdInline(m[2])+'</h4>')}
   else if((m=line.match(/^(\s*)[-*•]\s+(.*)$/))){flushP();if(!list||list.t!=='ul'){flushL();list={t:'ul',items:[]}}list.items.push({text:m[2],sub:m[1].length>=2})}
   else if((m=line.match(/^(\s*)(\d+)[.)]\s+(.*)$/))){flushP();if(!list||list.t!=='ol'){flushL();list={t:'ol',items:[],start:m[2]}}list.items.push({text:m[3],sub:m[1].length>=2})}
