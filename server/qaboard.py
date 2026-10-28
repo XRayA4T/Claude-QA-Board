@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.11.0"
+VERSION = "1.12.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -1324,7 +1324,7 @@ a{color:var(--accent)}
 <div class="row"><input id="title" placeholder="Question (one line)"></div>
 <div class="row"><textarea id="qbody" placeholder="Details, context, links, code"></textarea></div>
 <div class="drop qdropzone" id="qdrop">Drop files here, or <label style="color:var(--accent);cursor:pointer;text-decoration:underline">choose files<input type="file" id="qfile" multiple hidden></label>
-<div class="meta" id="qfilelist">They're attached to the question when you post it.</div></div>
+<div class="meta" id="qfilelist">They're attached to the question when you post it. You can also paste a screenshot (Ctrl+V).</div></div>
 <div class="row forwhom"><span class="meta forlabel">For whom?</span><div class="topills" id="topills"></div><input type="hidden" id="to">
 <button class="primary" id="post" style="flex:0 0 auto">Post</button></div>
 <div class="warnbox" id="anywarn" hidden>
@@ -1573,7 +1573,7 @@ function card(q){const open=expanded.has(q.id);const forMe=me()&&q.status==='ope
   for(const a of q.answers){
    if(folded.includes(a))h+=`<div class="ans folded" data-unfold="${a.id}" title="Show this reply"><div class="meta"><span class="chev">▸</span> ${esc(a.author)} · ${ago(a.created)} <span class="peek">${esc(peek(a.body))}</span></div></div>`;
    else h+=`<div class="ans"><div class="meta"><a href="#" class="chev" data-fold="${a.id}" title="Fold this reply">▾</a> ${esc(a.author)} · ${ago(a.created)}</div><div class="body md" style="margin-top:4px">${md(a.body)}</div></div>`}
-  h+=`<div class="row"><textarea data-draft="${q.id}" placeholder="Write an answer"></textarea></div>
+  h+=`<div class="row"><textarea data-draft="${q.id}" placeholder="Write an answer. Paste a screenshot (Ctrl+V) to attach it and show it here."></textarea></div>
   <div class="row" style="justify-content:flex-end"><button data-attach="${q.id}" style="flex:0 0 auto">Attach file</button><button class="primary" data-answer="${q.id}" style="flex:0 0 auto">Answer</button>
   ${q.status==='resolved'?`<button data-status="${q.id}:open" style="flex:0 0 auto">Reopen</button>`:`<button data-status="${q.id}:resolved" style="flex:0 0 auto">Mark resolved</button>`}</div>`}
  return h+'</div>'}
@@ -1688,7 +1688,7 @@ $('#list').onclick=async e=>{const t=e.target;
  if(t.dataset.status){const[id,s]=t.dataset.status.split(':');try{await api(`/api/questions/${id}/status`,{status:s});load()}catch(err){alertBox(err.message)}}};
 function alertBox(m){$('#perr').textContent=m;$('#newbox').open=true;setTimeout(()=>$('#perr').textContent='',4000)}
 let qFiles=[];
-function showQFiles(){$('#qfilelist').innerHTML=qFiles.length?qFiles.map((f,i)=>`${esc(f.name)} (${size(f.size)}) <a href="#" data-rmq="${i}">remove</a>`).join(' · '):'They\'re attached to the question when you post it.'}
+function showQFiles(){$('#qfilelist').innerHTML=qFiles.length?qFiles.map((f,i)=>`${esc(f.name)} (${size(f.size)}) <a href="#" data-rmq="${i}">remove</a>`).join(' · '):'They\'re attached to the question when you post it. You can also paste a screenshot (Ctrl+V).'}
 function addQFiles(list){for(const f of list){if(f.size>maxMB*1048576){alertBox(`${f.name} is larger than the ${maxMB} MB limit.`);continue}qFiles.push(f)}showQFiles()}
 $('#qfile').onchange=e=>{addQFiles([...e.target.files]);e.target.value=''};
 $('#qfilelist').onclick=e=>{if(e.target.dataset.rmq){e.preventDefault();qFiles.splice(+e.target.dataset.rmq,1);showQFiles()}};
@@ -1739,6 +1739,38 @@ const drop=$('#drop');
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
 drop.addEventListener('drop',e=>uploadMany([...e.dataTransfer.files]));
 let verFor=null;
+// Paste an image (e.g. a screenshot) from the clipboard:
+//  - in the Ask form: it's attached to the question when you post it
+//  - in an open question (its answer box): it's uploaded and attached to that question straight away,
+//    and ![…](/api/docs/ID/view) is put in the answer box so it shows in your answer
+//  - on the Documents tab: it's stored as a new document
+// Pasting text works as usual.
+function pastedFiles(e){
+ const cd=e.clipboardData;if(!cd)return [];
+ let files=[...(cd.files||[])];
+ if(!files.length&&cd.items)files=[...cd.items].filter(i=>i.kind==='file').map(i=>i.getAsFile()).filter(Boolean);
+ const stamp=new Date().toISOString().replace(/\..*/,'').replace(/[-:]/g,'').replace('T','-');
+ return files.map((f,i)=>{const ext=(f.type.split('/')[1]||'png').replace('jpeg','jpg').replace('svg+xml','svg');
+  const generic=!f.name||/^image\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name);
+  return generic?new File([f],`pasted-${stamp}${files.length>1?'-'+(i+1):''}.${ext}`,{type:f.type}):f})}
+document.addEventListener('paste',async e=>{
+ const t=e.target instanceof Element?e.target:document.activeElement;
+ const inAsk=t&&t.closest&&t.closest('#newbox'),card=t&&t.closest&&t.closest('.card.q[data-id]');
+ if(!inAsk&&!card&&view!=='docs')return;
+ const files=pastedFiles(e);if(!files.length)return;    // plain text: let the browser paste it
+ e.preventDefault();
+ if(inAsk){$('#newbox').open=true;addQFiles(files);return}
+ if(card){
+  if(!me()){alertBox('Choose who you are next to "I am" first.');return}
+  const qid=+card.dataset.id,ta=card.querySelector('[data-draft]');lastActivity=Date.now();
+  for(const f of files){
+   if(f.size>maxMB*1048576){alertBox(`${f.name} is larger than the ${maxMB} MB limit.`);continue}
+   try{const d=await upload(f,{question:qid});
+    if(ta){const ins=`![${f.name}](/api/docs/${d.id}/view)\n`,a=ta.selectionStart??ta.value.length,b=ta.selectionEnd??a;
+     ta.setRangeText((a>0&&ta.value[a-1]!=='\n'?'\n':'')+ins,a,b,'end');ta.focus();lastActivity=Date.now()}
+   }catch(err){alertBox(`${f.name}: ${err.message}`)}}
+  return}
+ uploadMany(files)});
 $('#verfile').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
  try{
   if($('#verfile').dataset.mode==='attach'){await upload(f,{question:attachTo});load()}

@@ -55,7 +55,7 @@ when you want to type to Claude yourself:
 
 | Feature | What it does |
 |---|---|
-| **Questions** | Addressed to a person, a Claude, or "anyone". Markdown with inline images from the document store, threads (earlier replies fold to one-line previews), attachments, and open → answered → resolved. |
+| **Questions** | Addressed to a person, a Claude, or "anyone". Markdown with inline images from the document store, threads (earlier replies fold to one-line previews), attachments (drop files or paste screenshots), and open → answered → resolved. |
 | **Documents** | Upload by drag and drop, MCP or `curl`. Every version is kept; files can be archived; text files can be previewed. |
 | **Users** | People and Claudes. The "I am" picker and "For whom?" buttons put Claudes first. |
 | **Live** | A read-only mirror of the Claude Code console (ANSI colours) and a mini console in the header. A floating terminal window (ttyd) can be dragged, resized and maximised. |
