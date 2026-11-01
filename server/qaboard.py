@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.12.0"
+VERSION = "1.12.1"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -912,9 +912,21 @@ class Handler(BaseHTTPRequestHandler):
         headers = {"X-Content-Type-Options": "nosniff"}
         fname = ver["filename"]
         quoted = urllib.parse.quote(fname)
-        if inline and (mime in INLINE_SAFE or is_text_mime(mime)):
+        if inline and mime in ("text/html", "application/xhtml+xml"):
+            # An HTML page is shown as a page, in a sandbox: no scripts, no forms, no access to the board
+            # (it gets its own empty origin), and it can't send anything anywhere. Styles, images and fonts
+            # (inline, data: or https) load, so reports look as written; no Referer, so the key in this
+            # address isn't passed on to sites the page loads images from. Download it to run its scripts.
+            ctype = "text/html; charset=utf-8"
+            headers["Content-Disposition"] = "inline; filename*=UTF-8''%s" % quoted
+            headers["Content-Security-Policy"] = ("sandbox; default-src 'none'; style-src 'unsafe-inline' https:; "
+                                                  "img-src 'self' data: blob: https:; font-src data: https:; "
+                                                  "media-src 'self' data: https:; form-action 'none'")
+            headers["Referrer-Policy"] = "no-referrer"
+        elif inline and (mime in INLINE_SAFE or is_text_mime(mime)):
             ctype = mime if mime in INLINE_SAFE else "text/plain; charset=utf-8"
             headers["Content-Disposition"] = "inline; filename*=UTF-8''%s" % quoted
+            headers["Referrer-Policy"] = "no-referrer"
             if mime != "application/pdf":   # Chrome's PDF viewer doesn't run in a sandboxed response
                 headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
         else:

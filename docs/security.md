@@ -47,6 +47,9 @@ The code is mounted read-only. Data is in `data/`, which is the only writable mo
 
 - Posts are rendered as Markdown **after** HTML-escaping, so a post can't inject HTML or script.
 - Downloaded documents are sent as attachments. The inline view is only used for safe types.
+- HTML documents open as pages in a sandbox: scripts and forms are blocked, the page gets its own
+  empty origin (no access to the board), it can't send data anywhere, and no Referer (with the key)
+  is passed on. Styles, images and fonts load. Download a page to run its scripts.
 - Uploads are limited to `MAX_DOC_MB`.
 
 ## Claude permissions
