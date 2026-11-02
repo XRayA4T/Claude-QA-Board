@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.12.1"
+VERSION = "1.13.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved")
 
@@ -170,9 +170,11 @@ class Store:
         q["to"] = q.pop("to_whom")
         q["answers"] = self._answers(q["id"])
         q["documents"] = [
-            {"id": r["id"], "title": r["title"]}
+            {"id": r["id"], "title": r["title"], "filename": r["filename"] or "", "mime": r["mime"] or ""}
             for r in self.db.execute(
-                "SELECT id, title FROM documents WHERE question_id=? AND archived=0 ORDER BY id", (q["id"],))
+                "SELECT d.id, d.title, v.filename, v.mime FROM documents d LEFT JOIN document_versions v "
+                "ON v.doc_id=d.id AND v.version=(SELECT MAX(version) FROM document_versions WHERE doc_id=d.id) "
+                "WHERE d.question_id=? AND d.archived=0 ORDER BY d.id", (q["id"],))
         ]
         return q
 
@@ -1279,6 +1281,24 @@ main>section{padding-top:14px}
 .livehead #openterm{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;height:28px;padding:0 12px;
  font-size:15.6px;font-weight:600;line-height:1;letter-spacing:0}
 @media (prefers-color-scheme:dark){.livehead #openterm{color:#16121b}}
+.mdshade{position:fixed;inset:0;z-index:109;background:rgba(20,20,24,.55)}
+.mdwin{position:fixed;z-index:110;top:4vh;left:50%;transform:translateX(-50%);width:min(1000px,94vw);max-height:92vh;
+ display:flex;flex-direction:column;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;
+ box-shadow:0 24px 70px rgba(0,0,0,.35);overflow:hidden}
+.mdhead{display:flex;gap:14px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--bg)}
+.mdtitles{flex:1;min-width:0}.mdtitles h3{margin:0;font-size:19px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mdhead a{color:var(--accent);font-size:15px;white-space:nowrap}
+.mdhead button{flex:0 0 auto;border:0;background:none;font-size:20px;line-height:1;padding:6px 8px;cursor:pointer;color:var(--muted);border-radius:6px}
+.mdhead button:hover{background:var(--drop);color:var(--fg)}
+.mdbody{overflow:auto;padding:22px 34px 34px;line-height:1.65}
+.mddoc h4{margin:1.2em 0 .5em;line-height:1.25;font-size:1.1em}
+.mddoc h4.h1{font-size:1.9em;margin-top:.3em;padding-bottom:.25em;border-bottom:1px solid var(--line)}
+.mddoc h4.h2{font-size:1.5em;padding-bottom:.2em;border-bottom:1px solid var(--line)}
+.mddoc h4.h3{font-size:1.25em}
+.mddoc p{margin:0 0 .9em}.mddoc ul,.mddoc ol{margin:0 0 .9em}.mddoc li{margin:3px 0}
+.mddoc pre{margin:0 0 1em}.mddoc .mdtable{margin:0 0 1em}
+body.mdopen{overflow:hidden}
+@media (max-width:640px){.mdwin{top:0;width:100vw;max-height:100vh;height:100vh;border-radius:0}.mdbody{padding:16px}}
 .termshade{position:fixed;inset:0;z-index:99;background:rgba(20,20,24,.55);backdrop-filter:blur(1px)}
 body.termopen{overflow:hidden}
 .termwin{position:fixed;z-index:100;display:flex;flex-direction:column;background:#202124;border-radius:10px;overflow:hidden;
@@ -1383,6 +1403,13 @@ a{color:var(--accent)}
 <input type="file" id="verfile" hidden>
 </section>
 <datalist id="people"></datalist>
+<div class="mdshade" id="mdshade" hidden></div>
+<div class="mdwin" id="mdwin" hidden role="dialog" aria-modal="true" aria-labelledby="mdtitle">
+ <div class="mdhead"><div class="mdtitles"><h3 id="mdtitle">Document</h3><div class="meta" id="mdmeta"></div></div>
+  <a id="mdtext" target="_blank" rel="noopener">Open as text</a><a id="mddl">Download</a>
+  <button id="mdclose" title="Close (Esc)" aria-label="Close">&#10005;</button></div>
+ <div class="mdbody md mddoc" id="mdbody"></div>
+</div>
 <div class="termshade" id="termshade" hidden title="Close the terminal window to use the board"></div>
 <div class="termwin" id="termwin" hidden role="dialog" aria-label="Claude Code terminal">
  <div class="termbar" id="termbar">
@@ -1631,10 +1658,11 @@ function cells(row){ // split a table row on | (not inside `code`, not \|), with
  if(row.startsWith('|'))out.shift();
  if(row.endsWith('|')&&!row.endsWith('\\|'))out.pop();
  return out}
-function md(src){return mdLines(esc(src||'').split('\n'))}
-function mdLines(lines){ // lines are already HTML-escaped
+function md(src,opt){return mdLines(esc(src||'').split('\n'),opt||{})}
+function mdLines(lines,opt){ // lines are already HTML-escaped; opt.doc: a Markdown file (wrapped lines join up)
+ opt=opt||{};
  const out=[];let para=[],list=null,code=null;
- const flushP=()=>{if(para.length){out.push('<p>'+para.map(mdInline).join('<br>')+'</p>');para=[]}};
+ const flushP=()=>{if(para.length){out.push('<p>'+para.map(mdInline).join(opt.doc?' ':'<br>')+'</p>');para=[]}};
  const flushL=()=>{if(list){out.push((list.t==='ol'&&list.start!=='1'?`<ol start="${list.start}">`:`<${list.t}>`)+
    list.items.map(i=>{const t=i.text.match(/^\[([ xX])\]\s+(.*)$/);   // task list: - [ ] todo / - [x] done
     return t?`<li class="task${i.sub?' sub':''}"><input type="checkbox" disabled${t[1]===' '?'':' checked'}> ${mdInline(t[2])}</li>`
@@ -1655,7 +1683,7 @@ function mdLines(lines){ // lines are already HTML-escaped
   else if(/^\s{0,3}&gt;/.test(line)){   // > block quote (consecutive lines; nests: >>)
    flushP();flushL();const q=[];
    while(li<lines.length&&/^\s{0,3}&gt;/.test(lines[li]))q.push(lines[li++].replace(/^\s{0,3}&gt;\s?/,''));li--;
-   out.push('<blockquote>'+mdLines(q)+'</blockquote>')}
+   out.push('<blockquote>'+mdLines(q,opt)+'</blockquote>')}
   else if((m=line.match(/^\s{0,3}(#{1,6})\s+(.*)$/))){flushP();flushL();out.push('<h4 class="h'+m[1].length+'">'+mdInline(m[2])+'</h4>')}
   else if((m=line.match(/^(\s*)[-*•]\s+(.*)$/))){flushP();if(!list||list.t!=='ul'){flushL();list={t:'ul',items:[]}}list.items.push({text:m[2],sub:m[1].length>=2})}
   else if((m=line.match(/^(\s*)(\d+)[.)]\s+(.*)$/))){flushP();if(!list||list.t!=='ol'){flushL();list={t:'ol',items:[],start:m[2]}}list.items.push({text:m[3],sub:m[1].length>=2})}
@@ -1677,7 +1705,7 @@ async function load(){
  const drafts={};document.querySelectorAll('[data-draft]').forEach(t=>{if(t.value)drafts[t.dataset.draft]=t.value});
  try{const [{questions},{people}]=await Promise.all([api('/api/questions?status='+filter),api('/api/people')]);
   $('#people').innerHTML=people.map(p=>`<option value="${esc(p)}">`).join('');
-  QUESTIONS=questions;
+  QUESTIONS=questions;questions.forEach(q=>noteDocs(q.documents||[]));
   $('#list').innerHTML=questions.length?questions.map(card).join(''):'<div class="empty">No questions here.</div>';
   for(const[id,v]of Object.entries(drafts)){const t=document.querySelector(`[data-draft="${id}"]`);if(t)t.value=v}
   if(refocus){const t=document.querySelector(`[data-draft="${refocus}"]`);if(t)t.focus()}
@@ -1751,6 +1779,31 @@ const drop=$('#drop');
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
 drop.addEventListener('drop',e=>uploadMany([...e.dataTransfer.files]));
 let verFor=null;
+// Markdown documents (.md) open in a pop-up, laid out like a page, instead of as plain text.
+const DOCMETA={};
+function noteDocs(list){for(const d of list||[])DOCMETA[d.id]=Object.assign(DOCMETA[d.id]||{},d)}
+function isMd(d){return !!d&&(/\.(md|markdown|mdown|mkd)$/i.test(d.filename||'')||d.mime==='text/markdown')}
+async function docMeta(id){if(!DOCMETA[id]||!DOCMETA[id].filename){try{noteDocs([await api('/api/docs/'+id)])}catch(e){}}return DOCMETA[id]}
+async function openMd(id,v){
+ const d=DOCMETA[id]||{},q=v?'?v='+encodeURIComponent(v):'';
+ $('#mdtitle').textContent=d.title||('doc '+id);$('#mdmeta').textContent=`doc ${id}${d.filename?' · '+d.filename:''}${v?' · version '+v:''}`;
+ $('#mdtext').href=url('/api/docs/'+id+'/view'+q);$('#mddl').href=url('/api/docs/'+id+'/download'+q);
+ $('#mdbody').innerHTML='<div class="meta">Loading…</div>';
+ $('#mdshade').hidden=$('#mdwin').hidden=false;document.body.classList.add('mdopen');
+ try{const r=await fetch(url('/api/docs/'+id+'/view'+q));if(!r.ok)throw new Error(r.status===404?'not found':'error '+r.status);
+  $('#mdbody').innerHTML=md(await r.text(),{doc:true});$('#mdbody').scrollTop=0}
+ catch(e){$('#mdbody').innerHTML=`<div class="empty err">Couldn't open doc ${id}: ${esc(e.message)}</div>`}}
+function closeMd(){$('#mdshade').hidden=$('#mdwin').hidden=true;$('#mdbody').innerHTML='';document.body.classList.remove('mdopen')}
+$('#mdclose').onclick=closeMd;$('#mdshade').onclick=closeMd;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#mdwin').hidden){e.preventDefault();closeMd()}});
+document.addEventListener('click',async e=>{   // any link to a document's view: .md files open in the pop-up
+ if(e.defaultPrevented||e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
+ const a=e.target.closest&&e.target.closest('a[href]');if(!a||a.classList.contains('mdimg')||a.id==='mdtext')return;
+ const m=a.href.match(/\/api\/docs\/(\d+)\/view(?:\?(.*))?$/);if(!m)return;
+ const id=+m[1],v=new URLSearchParams(m[2]||'').get('v'),known=DOCMETA[id]&&DOCMETA[id].filename;
+ if(known&&!isMd(DOCMETA[id]))return;           // not Markdown: open as usual
+ e.preventDefault();
+ if(isMd(await docMeta(id)))openMd(id,v);else window.open(a.href,'_blank','noopener')});
 // Paste an image (e.g. a screenshot) from the clipboard:
 //  - in the Ask form: it's attached to the question when you post it
 //  - in an open question (its answer box): it's uploaded and attached to that question straight away,
@@ -1804,6 +1857,7 @@ async function loadDocs(){
  const a=document.activeElement;if(a&&a.closest&&a.closest('#v-docs')&&a.id!=='dsearch'&&a.value&&a.type!=='checkbox')return;
  try{const p=new URLSearchParams();const s=$('#dsearch').value.trim();if(s)p.set('q',s);if($('#darch').checked)p.set('archived','1');
   const j=await api('/api/docs?'+p);maxMB=j.max_mb||maxMB;$('#maxmb').textContent=`Up to ${maxMB} MB per file. Everyone with access to the board can open these.`;
+  noteDocs(j.documents);
   $('#docs').innerHTML=j.documents.length?j.documents.map(docRow).join(''):'<div class="empty">No documents yet. Drop a file above to add one.</div>';
  }catch(e){$('#docs').innerHTML=`<div class="empty err">Could not reach the board: ${esc(e.message)}</div>`}}
 $('#docs').onclick=async e=>{const t=e.target;

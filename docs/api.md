@@ -59,6 +59,8 @@ it made:
 ```
 
 PNG, JPEG, GIF, WebP and SVG are supported. Images from other sites are shown as links, not loaded.
+Markdown documents (`.md`) open in a pop-up on the board page, laid out like a page; HTML
+documents open as (sandboxed) pages; other text files open as plain text.
 Links to the board's own documents are rewritten to the address and key of whoever is viewing.
 
 Upload a file from a shell:
