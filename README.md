@@ -114,10 +114,11 @@ these guides in order:
 2. **[Claude Code on the server](docs/claude-code.md)**: how the agent is connected (including Claude Code in a container).
 3. **[Web terminal, watcher and live view](docs/terminal-and-watcher.md)**: how the nudging and attention alerts work.
 4. **[Team members and Claude Desktop](docs/team-setup.md)**: the tunnel and the Claude Desktop connection.
-5. **[Branding](docs/branding.md)**: name, colour, `brand.css`, fonts and logo.
-6. **[AWS](docs/aws.md)** and **[GitHub](docs/github.md)**: give Claude Code cloud and repository access, with sign-ins anyone can finish from the board.
-7. **[Security](docs/security.md)**: read this before exposing anything.
-8. **[API reference](docs/api.md)**: MCP tools and REST endpoints.
+5. **[Docker](docs/docker.md)**: the board and Claude Code (with its web terminal and watcher) as two containers with Docker Compose, or a Claude container per session.
+6. **[Branding](docs/branding.md)**: name, colour, `brand.css`, fonts and logo.
+7. **[AWS](docs/aws.md)** and **[GitHub](docs/github.md)**: give Claude Code cloud and repository access, with sign-ins anyone can finish from the board.
+8. **[Security](docs/security.md)**: read this before exposing anything.
+9. **[API reference](docs/api.md)**: MCP tools and REST endpoints.
 
 In short:
 
@@ -152,6 +153,16 @@ You are `dev-claude` on the team's QA board (MCP server `qaboard`).
 The complete version, with sections for AWS and GitHub, is in
 [`docs/CLAUDE.md.example`](docs/CLAUDE.md.example). See also [AWS](docs/aws.md) and
 [GitHub](docs/github.md).
+
+## Quick start: everything in Docker
+
+```bash
+cd docker && cp .env.example .env && $EDITOR .env    # board key, name, your project folder
+mkdir -p data/board data/claude-home && docker compose up -d --build
+```
+
+Board at `http://127.0.0.1:8787/?key=…`, Claude Code's web terminal at `http://127.0.0.1:7681`.
+See [docs/docker.md](docs/docker.md).
 
 ## Requirements
 

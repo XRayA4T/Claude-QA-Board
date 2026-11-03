@@ -1,0 +1,78 @@
+# Claude QA Board in two containers:
+#   board   the QA board (server/qaboard.py on python:3.12-alpine)
+#   claude  Claude Code in a tmux session, the web terminal (ttyd) onto that session, and the
+#           board watcher - all in one container, with your project mounted at /workspace
+#
+#   cd docker && cp .env.example .env && $EDITOR .env
+#   mkdir -p data/board data/claude-home
+#   docker compose up -d --build
+#
+# Both publish on this machine's 127.0.0.1 only. See docs/docker.md.
+name: qaboard-${ENV_NAME:-main}
+
+services:
+  board:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: ${BOARD_MEMORY:-512m}
+    cpus: 0.5
+    pids_limit: 128
+    command: >-
+      python3 -u /app/qaboard.py serve --port 8787 --db /data/qaboard.db
+      --key "${BOARD_KEY:?set BOARD_KEY in docker/.env}"
+      --name "${BOARD_NAME:-Team}" --accent "${BOARD_ACCENT:-#4f46e5}"
+      --max-doc-mb ${MAX_DOC_MB:-50}
+      --terminal-url "http://127.0.0.1:${TERMINAL_PORT:-7681}"
+    volumes:
+      - ../server/qaboard.py:/app/qaboard.py:ro
+      - ./data/board:/data                          # qaboard.db and docs/: back this folder up
+      - ${BRAND_DIR:-../brand/example}:/data/brand:ro
+    ports:
+      - "127.0.0.1:${BOARD_PORT:-8787}:8787"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import os,urllib.request as u; u.urlopen('http://127.0.0.1:8787/health?key='+os.environ['K'], timeout=3)"]
+      interval: 30s
+      retries: 3
+    environment:
+      K: ${BOARD_KEY}
+    logging:
+      options: {max-size: 5m, max-file: "2"}
+
+  claude:
+    build:
+      context: ..                                   # the repo: the image includes watcher/board-watch.py
+      dockerfile: docker/claude/Dockerfile
+      args:
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+        WITH_CHROMIUM: ${WITH_CHROMIUM:-0}
+    image: qaboard-claude
+    restart: unless-stopped
+    init: true                                      # reaps finished processes (no zombie build-up)
+    shm_size: 2gb                                   # room for a headless browser
+    depends_on: [board]
+    environment:
+      BOARD_URL: http://board:8787                  # how Claude and the watcher reach the board
+      BOARD_KEY: ${BOARD_KEY}
+      DEV_WHO: ${DEV_WHO:-dev-claude}
+      CLAUDE_ARGS: ${CLAUDE_ARGS:-}
+      WATCH: ${WATCH:-1}
+      WATCH_POLL: ${WATCH_POLL:-5}
+      WATCH_IDLE: ${WATCH_IDLE:-20}
+      WATCH_PROMPT_CHECK: ${WATCH_PROMPT_CHECK:-1}
+      WATCH_LIVE: ${WATCH_LIVE:-1}
+      TERMINAL_TITLE: ${TERMINAL_TITLE:-claude ${ENV_NAME:-main}}
+      TTYD_CREDENTIAL: ${TTYD_CREDENTIAL:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${PROJECT_DIR:?set PROJECT_DIR in docker/.env}:/workspace
+      - ./data/claude-home:/home/claude             # Claude's sign-in, settings, history, gh/aws config
+    ports:
+      - "127.0.0.1:${TERMINAL_PORT:-7681}:7681"
+      # The app you develop: add its dev-server ports here (the dev server must listen on 0.0.0.0):
+      # - "127.0.0.1:3000:3000"
+    logging:
+      options: {max-size: 5m, max-file: "2"}

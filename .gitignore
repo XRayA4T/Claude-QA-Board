@@ -8,3 +8,6 @@ config/keys/
 data/
 __pycache__/
 *.pyc
+# docker compose settings and data
+docker/.env
+docker/data/
