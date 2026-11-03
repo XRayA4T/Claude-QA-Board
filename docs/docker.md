@@ -62,13 +62,70 @@ docker compose up -d --build
 
 Then:
 
-1. **Open the terminal** at <http://127.0.0.1:7681> and sign in to Claude Code the first time. It
-   shows a link to open in your browser. The sign-in is saved in `data/claude-home`, so you only do
-   this once.
+1. **Open the terminal** at <http://127.0.0.1:7681>. If Claude Code signs in from environment
+   variables (next section), it's ready. Otherwise sign in the first time: it shows a link to open in
+   your browser. The sign-in is saved in `data/claude-home`, so you only do this once.
 2. **Open the board** at `http://127.0.0.1:8787/?key=YOUR_KEY`, add your team on the **Users** tab,
    and pick yourself next to **I am**.
 3. **Ask it something:** post a question to `dev-claude`. The watcher delivers it to Claude within a
    few seconds.
+
+### Signing in with environment variables (`docker/claude.env`)
+
+If your Anthropic settings are in environment variables (an API key, a subscription token, Amazon
+Bedrock, Google Vertex AI, or a company gateway), give them to the Claude container instead of signing
+in by hand:
+
+```bash
+cd docker
+cp claude.env.example claude.env && chmod 600 claude.env
+$EDITOR claude.env          # keep one section
+docker compose up -d        # creates the container again with the new settings
+```
+
+`compose.yaml` loads `claude.env` into the Claude container only, if the file exists. The board never
+sees it. The file is git-ignored.
+
+| Signing in with | Put in `claude.env` |
+|---|---|
+| An API key (Claude Console) | `ANTHROPIC_API_KEY=sk-ant-…` |
+| A Claude subscription (Pro, Max, Team, Enterprise) | `CLAUDE_CODE_OAUTH_TOKEN=…`, made once on any computer with `claude setup-token` |
+| Amazon Bedrock | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION=…`, plus access keys, `AWS_BEARER_TOKEN_BEDROCK`, or `AWS_PROFILE` with `~/.aws` mounted |
+| Google Vertex AI | `CLAUDE_CODE_USE_VERTEX=1`, `CLOUD_ML_REGION=…`, `ANTHROPIC_VERTEX_PROJECT_ID=…`, `GOOGLE_APPLICATION_CREDENTIALS=` a key file inside the container |
+| A gateway or proxy in front of the API | `ANTHROPIC_BASE_URL=…`, `ANTHROPIC_AUTH_TOKEN=…` |
+| A specific model (with any of the above) | `ANTHROPIC_MODEL=…` |
+
+**Keeping secrets out of the file:** a line with only a name, such as `ANTHROPIC_API_KEY`, passes
+that variable through from the shell you run `docker compose` in. Then nothing secret is written in
+`claude.env`:
+
+```bash
+# claude.env
+ANTHROPIC_API_KEY
+ANTHROPIC_MODEL=sonnet          # an alias (sonnet, opus) or a full model name
+
+# your shell (e.g. from a password manager or ~/.bashrc)
+export ANTHROPIC_API_KEY=sk-ant-…
+docker compose up -d
+```
+
+**Credential files** (an AWS profile, a Google key file) need a volume. `compose.yaml` has commented
+examples under the Claude service's `volumes:`. Alternatively, put the file in `data/claude-home`,
+which is `/home/claude` inside the container.
+
+What the container does with these settings:
+
+- The tmux session, Claude Code and every restart of it inherit them. You don't need to export
+  anything in the terminal.
+- When it finds one of these settings, the entrypoint skips Claude Code's first-run screens. For
+  `ANTHROPIC_API_KEY`, it also accepts the key up front; otherwise Claude Code asks once whether to
+  use it. The container log says which method is in use:
+  `docker compose logs claude | head -3`.
+- After changing `claude.env` or the shell variables, run `docker compose up -d`. `docker compose
+  restart` keeps the old values.
+
+Anyone who can run `docker` commands on the host can read these values with `docker inspect`, and so
+can Claude itself, from inside the container. Use a key meant for this use, and limit its spend.
 
 ### Settings (`docker/.env`)
 
@@ -153,15 +210,25 @@ Claude Code in it.
 ```bash
 #!/usr/bin/env bash
 # claude-box - run Claude Code for the current folder in a fresh container
+ENVFILE=(); [ -f "$HOME/claude-state/claude.env" ] && ENVFILE=(--env-file "$HOME/claude-state/claude.env")
 exec docker run --rm -it --init \
   --name "claude-$(basename "$PWD")-$$" \
   --shm-size=2g \
   -v "$PWD:$PWD" -w "$PWD" \
   -v "$HOME/claude-state:/home/claude" \
+  "${ENVFILE[@]}" \
   -e TERM -e COLORTERM \
   --entrypoint claude \
   qaboard-claude "$@"
 ```
+
+Anthropic settings in environment variables work the same way as in Compose: put them in
+`~/claude-state/claude.env`, in the same format as `docker/claude.env.example`. `docker run --env-file`
+also passes through lines that are only a name. The web terminal starts the launcher from cron, which
+has almost no environment, so a name-only line there needs the variable set where the launcher runs.
+In practice, write the value in the file, or export it at the top of the launcher. With `--entrypoint
+claude` there's no automatic acceptance of an API key: answer Claude Code's one-time question in the
+terminal.
 
 - **`--init` matters.** Without it Claude Code is process 1 in the container and never cleans up
   finished child processes. Headless browsers in particular then pile up until nothing new can start.

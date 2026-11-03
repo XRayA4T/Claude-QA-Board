@@ -11,3 +11,4 @@ __pycache__/
 # docker compose settings and data
 docker/.env
 docker/data/
+docker/claude.env

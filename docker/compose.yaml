@@ -54,6 +54,9 @@ services:
     init: true                                      # reaps finished processes (no zombie build-up)
     shm_size: 2gb                                   # room for a headless browser
     depends_on: [board]
+    env_file:                                       # Anthropic sign-in / model settings (docs/docker.md)
+      - path: ./claude.env
+        required: false
     environment:
       BOARD_URL: http://board:8787                  # how Claude and the watcher reach the board
       BOARD_KEY: ${BOARD_KEY}
@@ -70,6 +73,9 @@ services:
     volumes:
       - ${PROJECT_DIR:?set PROJECT_DIR in docker/.env}:/workspace
       - ./data/claude-home:/home/claude             # Claude's sign-in, settings, history, gh/aws config
+      # Credentials as files, if claude.env refers to them:
+      # - ~/.aws:/home/claude/.aws:ro                 # Bedrock with AWS_PROFILE
+      # - ./gcp-key.json:/home/claude/gcp-key.json:ro # Vertex with GOOGLE_APPLICATION_CREDENTIALS
     ports:
       - "127.0.0.1:${TERMINAL_PORT:-7681}:7681"
       # The app you develop: add its dev-server ports here (the dev server must listen on 0.0.0.0):

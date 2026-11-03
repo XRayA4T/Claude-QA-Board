@@ -30,6 +30,16 @@ def save(path, data):
 cj = os.path.join(home, ".claude.json")          # user-scope MCP servers live here
 d = load(cj)
 d.setdefault("mcpServers", {})["qaboard"] = {"type": "http", "url": "%s/mcp?who=%s&key=%s" % (board, who, key)}
+# Signing in from the environment (docker/claude.env): skip the first-run screens, and accept the API key
+# up front (Claude Code otherwise asks once whether to use a key it finds in ANTHROPIC_API_KEY).
+api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+if api_key or any(os.environ.get(v) for v in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN",
+                                                "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX")):
+    d["hasCompletedOnboarding"] = True
+if api_key:
+    approved = d.setdefault("customApiKeyResponses", {}).setdefault("approved", [])
+    if api_key[-20:] not in approved:
+        approved.append(api_key[-20:])
 save(cj, d)
 
 sp = os.path.join(home, ".claude", "settings.json")
@@ -46,7 +56,10 @@ hooks[:] = [g for g in hooks if g.get("hooks")]
 hooks.append({"hooks": [{"type": "command",
     "command": "curl -s --max-time 2 '%s/api/digest?to=%s&key=%s' || true" % (board, who, key)}]})
 save(sp, s)
-print("Claude Code connected to %s as %s" % (board, who))
+how = ("API key" if api_key else "subscription token" if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+       else "Bedrock" if os.environ.get("CLAUDE_CODE_USE_BEDROCK") else "Vertex AI" if os.environ.get("CLAUDE_CODE_USE_VERTEX")
+       else "gateway token" if os.environ.get("ANTHROPIC_AUTH_TOKEN") else "its saved sign-in (or sign in in the terminal)")
+print("Claude Code connected to %s as %s; signs in with %s" % (board, who, how))
 PY
 
 # 2. the shared tmux session (created now, so Claude runs before anyone opens the terminal)
