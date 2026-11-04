@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.14.0"
+VERSION = "1.15.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -130,6 +130,10 @@ class Store:
                 question_id INTEGER,
                 archived INTEGER NOT NULL DEFAULT 0,
                 created REAL NOT NULL,
+                updated REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS deployments(
+                id TEXT PRIMARY KEY,
+                state TEXT NOT NULL,
                 updated REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS users(
                 name TEXT PRIMARY KEY,
@@ -227,6 +231,42 @@ class Store:
             if cur.rowcount == 0:
                 raise KeyError("no question #%s" % qid)
             return self.get(qid)
+
+    # -- deployments: progress reports (the whole state each time; a report replaces the earlier one)
+    def put_deployment(self, dep_id, state):
+        state = clean_deployment(dep_id, state)
+        now = time.time()
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO deployments(id, state, updated) VALUES(?,?,?)",
+                            (dep_id, json.dumps(state), now))
+            self.db.execute("DELETE FROM deployments WHERE id NOT IN "
+                            "(SELECT id FROM deployments ORDER BY updated DESC LIMIT 50)")
+            self.db.commit()
+        # "waitingFor" raises the board's Needs-you banner, and clears the one it raised when it's gone
+        wf, att = state.get("waitingFor"), self.attention
+        if isinstance(wf, dict) and wf.get("reason"):
+            new = clean_attention(wf.get("reason"), wf.get("url"), wf.get("code"), "deployment")
+            new["deployment"] = dep_id
+            if not att or any(att.get(k) != new.get(k) for k in ("reason", "url", "code", "deployment")):
+                self.attention = new
+        elif att and att.get("deployment") == dep_id:
+            self.attention = None
+        state["received"] = now
+        return state
+
+    def deployments(self, limit=20, dep_id=None):
+        with self.lock:
+            if dep_id:
+                rows = self.db.execute("SELECT * FROM deployments WHERE id=?", (dep_id,)).fetchall()
+            else:
+                rows = self.db.execute("SELECT * FROM deployments ORDER BY updated DESC LIMIT ?",
+                                       (max(1, min(int(limit or 20), 50)),)).fetchall()
+        out = []
+        for r in rows:
+            d = json.loads(r["state"])
+            d["received"] = r["updated"]
+            out.append(d)
+        return out
 
     def get(self, qid):
         row = self.db.execute("SELECT * FROM questions WHERE id=?", (qid,)).fetchone()
@@ -488,6 +528,31 @@ class Store:
             return self._document(int(doc_id))
 
 
+DEP_STATUSES = ("running", "waiting", "done", "failed")
+
+
+def clean_deployment(dep_id, state):
+    """Check a deployment progress report: a JSON object (the whole state), up to 256 KB."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", dep_id or ""):
+        raise ValueError("deployment id: letters, digits and . _ - only (up to 80)")
+    if not isinstance(state, dict):
+        raise ValueError("send the deployment state as a JSON object")
+    state = dict(state)
+    state["deployment"] = dep_id
+    if state.get("status") not in DEP_STATUSES:
+        raise ValueError("status must be one of " + ", ".join(DEP_STATUSES))
+    if "progress" in state:
+        try:
+            state["progress"] = max(0.0, min(1.0, float(state["progress"])))
+        except (TypeError, ValueError):
+            state.pop("progress")
+    if not isinstance(state.get("steps", []), list):
+        raise ValueError("steps must be a list")
+    if len(json.dumps(state)) > 256 * 1024:
+        raise ValueError("deployment state is larger than 256 KB")
+    return state
+
+
 def clean_attention(reason, url=None, code=None, by="someone"):
     """Validate a needs-attention signal: one-line reason, an optional http(s) link, an optional short code."""
     reason = " ".join(str(reason or "").split())[:200]
@@ -589,6 +654,36 @@ TOOLS = [
         },
     },
     {
+        "name": "deployment_progress",
+        "description": "Show the progress of a deployment (or any long multi-step job) on the board: a progress "
+                       "bar at the top of every page and the full step list on the Deploys tab. Send the WHOLE "
+                       "state every time (a report replaces the previous one for that deployment id), when a step "
+                       "starts or finishes and when you start waiting for someone. status: running, waiting, done "
+                       "or failed. waitingFor ({reason, url, code}) raises the board's Needs-you banner and is cleared "
+                       "when you send it as null. error: {step, message, log} with the full log uploaded as a "
+                       "document ('doc 812').",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "deployment": {"type": "string", "description": "Id, e.g. dep-20261104-0933"},
+                "target": {"type": "string", "description": "Where to, e.g. www-dev"},
+                "status": {"type": "string", "enum": list(DEP_STATUSES)},
+                "step": {"type": "string", "description": "Id of the current step"},
+                "progress": {"type": "number", "description": "0..1, optional (else counted from the steps)"},
+                "questions": {"type": "array", "items": {"type": "integer"}, "description": "Board questions it ships"},
+                "branches": {"type": "array", "items": {"type": "string"}},
+                "commit": {"type": "string"},
+                "started": {"type": "string", "description": "ISO 8601 time"},
+                "updated": {"type": "string", "description": "ISO 8601 time"},
+                "steps": {"type": "array", "description": "In order: {id, label, status, finished?, detail?, "
+                          "stages?: [{name, status}]}", "items": {"type": "object"}},
+                "waitingFor": {"type": ["object", "null"], "description": "{reason, url?, code?} or null"},
+                "error": {"type": ["object", "null"], "description": "{step, message, log?} or null"},
+            },
+            "required": ["deployment", "status"],
+        },
+    },
+    {
         "name": "upload_document",
         "description": "Store a document in the team's shared document store, where everyone on the board "
                        "can open it. Pass text files (markdown, code, CSV, logs, JSON) as `content`; small binary "
@@ -684,6 +779,8 @@ INSTRUCTIONS = (
     "Answer questions addressed to you with concrete, verified information. "
     "Put documents the team should be able to read (specs, reports, notes, screenshots) in the document store "
     "with upload_document, and link them from questions or answers as 'doc <id>'. "
+    "When you run a deployment or another long multi-step job, report it with deployment_progress (the whole "
+    "state each time a step starts or finishes) so the team can follow it on the board. "
     "A question with status on_hold has been put on hold by the team: don't answer, chase, follow up on or ask "
     "about it (not even your own) until it is taken off hold; it is left out of your inbox until then. "
     "Posts are Markdown; to show an image (PNG, JPEG, GIF, WebP or SVG) from the document store in a post, "
@@ -784,6 +881,11 @@ def call_tool(store, who, name, args, base_url=""):
     if name == "archive_document":
         d = store.set_archived(int(args["id"]), not args.get("restore"))
         return [_text("Document %d is now %s." % (d["id"], "archived" if d["archived"] else "active"))]
+    if name == "deployment_progress":
+        d = store.put_deployment(str(args.get("deployment") or ""), args)
+        cur = next((x for x in d.get("steps") or [] if isinstance(x, dict) and x.get("id") == d.get("step")), {})
+        return [_text("Deployment %s: %s%s. Shown on the board's Deploys tab." % (
+            d["deployment"], d["status"], (" - " + str(cur.get("label") or d.get("step"))) if d.get("step") else ""))]
     if name == "needs_attention":
         att = clean_attention(args.get("reason"), args.get("url"), args.get("code"), who)
         store.attention = att
@@ -1005,6 +1107,11 @@ class Handler(BaseHTTPRequestHandler):
                     n = int(q["lines"])
                     live["text"] = "\n".join(live["text"].split("\n")[-n:]) if n else ""
                 return self._json(200, live)
+            if path == "/api/deployments":
+                return self._json(200, {"deployments": store.deployments(q.get("limit", 20))})
+            if path.startswith("/api/deployments/"):
+                found = store.deployments(dep_id=path[len("/api/deployments/"):])
+                return self._json(200, found[0]) if found else self._json(404, {"error": "no such deployment"})
             if path == "/api/digest":
                 return self._send(200, store.digest(q.get("to") or self._who(q)), "text/plain")
             if path == "/api/docs":
@@ -1044,6 +1151,8 @@ class Handler(BaseHTTPRequestHandler):
                                     "text": text, "busy": bool(d.get("busy")), "prompt": bool(d.get("prompt")),
                                     "title": str(d.get("title") or "")[:80]}
                 return self._json(200, {"ok": True})
+            if path.startswith("/api/deployments/"):   # PUT (or POST) the whole state of a deployment
+                return self._json(200, store.put_deployment(path[len("/api/deployments/"):], self._body(300 * 1024)))
             if path == "/api/attention":   # set or clear "the session needs someone" (page, watcher, scripts)
                 d = self._body(64 * 1024)
                 if d.get("clear"):
@@ -1111,8 +1220,13 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             return self._json(400, {"error": str(e)})
 
-    def do_DELETE(self):
+    def do_PUT(self):
+        if self._parsed()[0].startswith("/api/deployments/"):
+            return self.do_POST()
         self._send(405, "", extra={"Allow": "GET, POST"})
+
+    def do_DELETE(self):
+        self._send(405, "", extra={"Allow": "GET, POST, PUT"})
 
 
 def lighten(hex_colour, amount=0.45):
@@ -1308,6 +1422,37 @@ main>section{padding-top:14px}
 .livehead #openterm{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;height:28px;padding:0 12px;
  font-size:15.6px;font-weight:600;line-height:1;letter-spacing:0}
 @media (prefers-color-scheme:dark){.livehead #openterm{color:#16121b}}
+.deps{display:flex;flex-direction:column;gap:6px;padding:8px 0 2px}
+.deprow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);
+ border-radius:10px;padding:7px 12px;cursor:pointer;font:inherit;font-size:15px;color:var(--fg)}
+.deprow:hover{border-color:var(--accent)}
+.depname{font-weight:600;white-space:nowrap}
+.depbar{flex:1;min-width:80px;height:10px;border-radius:99px;background:var(--drop);overflow:hidden;position:relative}
+.depbar i{position:absolute;inset:0 auto 0 0;border-radius:99px;background:var(--accent);transition:width .6s}
+.s-running .depbar i{background-image:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);background-size:200% 100%;
+ background-color:var(--accent);animation:depshine 1.6s linear infinite}
+@keyframes depshine{from{background-position:200% 0}to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.s-running .depbar i{animation:none}}
+.s-done .depbar i{background:var(--ans)}.s-failed .depbar i{background:#e5484d}.s-waiting .depbar i,.deprow.needs .depbar i{background:#d4a017}
+.depstep{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42%}
+.deppct{font-variant-numeric:tabular-nums;color:var(--muted);min-width:3.2em;text-align:right}
+.dstat{font-size:13px;font-weight:700;border-radius:99px;padding:0 8px;border:1px solid;white-space:nowrap}
+.dstat.running{color:var(--accent)}.dstat.waiting,.dstat.needs{color:#b8860b}.dstat.done{color:var(--ans)}.dstat.failed{color:#e5484d}
+.depcard h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 4px}
+.depcard .depbar{height:12px;margin:10px 0 12px}
+.depsteps{list-style:none;padding:0;margin:0;display:grid;gap:6px}
+.depsteps li{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:baseline}
+.depsteps .ic{text-align:center;font-weight:700}.depsteps .done .ic{color:var(--ans)}.depsteps .failed .ic{color:#e5484d}
+.depsteps .running .ic{color:var(--accent)}.depsteps .waiting{color:var(--muted)}
+.depsteps .when{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
+.stages{grid-column:2/4;display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.stage{font-size:13px;border:1px solid var(--line);border-radius:6px;padding:1px 8px;background:var(--bg)}
+.stage.done{color:var(--ans);border-color:var(--ans)}.stage.running{color:var(--accent);border-color:var(--accent);font-weight:600}
+.stage.failed{color:#e5484d;border-color:#e5484d}.stage.waiting{color:var(--muted)}
+.depmeta{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px;color:var(--muted)}
+.depmeta code{font-size:13px}
+.deperr{margin-top:10px;border-left:3px solid #e5484d;padding:6px 10px;background:color-mix(in srgb,#e5484d 10%,transparent);border-radius:0 8px 8px 0}
+.depwait{margin-top:10px;border-left:3px solid #d4a017;padding:6px 10px;background:color-mix(in srgb,#d4a017 12%,transparent);border-radius:0 8px 8px 0}
 .mdshade{position:fixed;inset:0;z-index:109;background:rgba(20,20,24,.55)}
 .mdwin{position:fixed;z-index:110;top:4vh;left:50%;transform:translateX(-50%);width:min(1000px,94vw);max-height:92vh;
  display:flex;flex-direction:column;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;
@@ -1375,7 +1520,8 @@ a{color:var(--accent)}
 <header><div class="brand"><img src="/favicon.svg" alt="" width="34" height="34"><h1>{BRAND_HTML}<span>Q&amp;A Board <small class="ver">v{VERSION}</small></span></h1></div>
 <button class="mini" id="mini" hidden title="Claude's console - open the Live view" aria-label="Open the Live view"><pre id="minipre"></pre><span class="led"></span></button>
 <label class="me">I am <select id="me"><option value="">choose…</option></select></label></header>
-<nav class="views" id="views"><button data-v="questions">Questions</button><button data-v="docs">Documents</button><button data-v="live">Live</button><button data-v="users">Users</button></nav>
+<nav class="views" id="views"><button data-v="questions">Questions</button><button data-v="docs">Documents</button><button data-v="live">Live</button><button data-v="deploys">Deploys</button><button data-v="users">Users</button></nav>
+<div class="deps" id="deps" hidden></div>
 </div>
 
 <section id="v-questions">
@@ -1396,6 +1542,10 @@ a{color:var(--accent)}
 <div id="list"></div>
 </section>
 
+<section id="v-deploys" hidden>
+<div class="meta" style="margin-bottom:10px">Deployments reported by Claude (deployment_progress) or a script (PUT /api/deployments/ID). The latest 20 are kept here.</div>
+<div id="deplist"><div class="empty">No deployments yet.</div></div>
+</section>
 <section id="v-users" hidden>
 <div class="card"><div class="row" style="margin-top:0"><input id="newuser" placeholder="Name, e.g. alice or bob-claude" autocomplete="off">
 <select id="newkind" style="flex:0 0 130px"><option value="person">Person</option><option value="claude">Claude</option></select>
@@ -1468,13 +1618,13 @@ const me=()=>($('#me').value.trim().toLowerCase().replace(/\s+/g,'-')||'');
 $('#me').onchange=()=>{store('qa-me',$('#me').value);refresh()};
 
 // ---- views
-let view=['#docs','#live','#users'].includes(location.hash)?location.hash.slice(1):(store('qa-view')||'questions');
+let view=['#docs','#live','#users','#deploys'].includes(location.hash)?location.hash.slice(1):(store('qa-view')||'questions');
 function showView(v){view=v;store('qa-view',v);
  document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
- $('#v-questions').hidden=v!=='questions';$('#v-docs').hidden=v!=='docs';$('#v-live').hidden=v!=='live';$('#v-users').hidden=v!=='users';refresh()}
+ $('#v-questions').hidden=v!=='questions';$('#v-docs').hidden=v!=='docs';$('#v-live').hidden=v!=='live';$('#v-users').hidden=v!=='users';$('#v-deploys').hidden=v!=='deploys';refresh()}
 $('#views').onclick=e=>{const b=e.target.closest('button');if(b&&b.dataset.v)showView(b.dataset.v)};
 $('#mini').onclick=()=>{showView('live');window.scrollTo(0,0)};
-function refresh(){loadUsers();view==='docs'?loadDocs():view==='live'?loadLive():view==='users'?null:load()}
+function refresh(){loadUsers();view==='docs'?loadDocs():view==='live'?loadLive():view==='users'?null:view==='deploys'?loadDeps():load()}
 setInterval(()=>{if(!document.hidden)loadLive()},2000);
 
 // ---- live console (sent by the board watcher on the server, when it runs with --live)
@@ -1808,6 +1958,55 @@ const drop=$('#drop');
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
 drop.addEventListener('drop',e=>uploadMany([...e.dataTransfer.files]));
 let verFor=null;
+// ---- deployments: a progress bar under the tabs while one is running (or just finished), full detail on Deploys
+let DEPS=[],depTimer=null;
+function depTime(t){const d=t?new Date(t):null;return d&&!isNaN(d)?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}
+function depPct(d){
+ if(typeof d.progress==='number')return Math.round(d.progress*100);
+ const st=(d.steps||[]).filter(x=>x&&typeof x==='object');if(!st.length)return d.status==='done'?100:0;
+ let n=0;for(const x of st){if(x.status==='done')n+=1;
+  else if(x.status==='running'){const sg=(x.stages||[]).filter(g=>g&&typeof g==='object');n+=sg.length?sg.filter(g=>g.status==='done').length/sg.length:0.5}}
+ return Math.round(n/st.length*100)}
+function depCur(d){const st=(d.steps||[]).filter(x=>x&&typeof x==='object');
+ const s=st.find(x=>x.id===d.step)||st.find(x=>x.status==='running')||st.find(x=>x.status==='failed');
+ if(!s)return '';const g=(s.stages||[]).find(x=>x&&x.status==='running');return (s.label||s.id||'')+(g?' · '+g.name:'')}
+function depState(d){return d.waitingFor?'needs':d.status}
+function depLabel(d){const s=depState(d),stale=d.status==='running'&&Date.now()/1000-d.received>900;
+ return s==='needs'?'needs you':stale?'no update '+ago(d.received).replace(' ago',''):s}
+function depActive(d){return d.status==='running'||d.status==='waiting'||d.waitingFor||Date.now()/1000-d.received<900}
+function renderDepStrip(){const act=DEPS.filter(depActive).slice(0,3),box=$('#deps');
+ box.hidden=!act.length;
+ box.innerHTML=act.map(d=>{const p=depPct(d);return `<button class="deprow s-${esc(d.status)}${d.waitingFor?' needs':''}" data-dep="${esc(d.deployment)}" title="Open on the Deploys tab">
+  <span class="depname">${esc(d.target||d.deployment)}</span><span class="depbar"><i style="width:${p}%"></i></span>
+  <span class="deppct">${p}%</span><span class="depstep">${esc(depCur(d)||(d.status==='done'?'finished '+depTime(d.updated):''))}</span>
+  <span class="dstat ${depState(d)}">${esc(depLabel(d))}</span></button>`}).join('')}
+const ICON={done:'✓',running:'●',failed:'✕',waiting:'○'};
+function depCard(d){const p=depPct(d),st=(d.steps||[]).filter(x=>x&&typeof x==='object'),wf=d.waitingFor,er=d.error;
+ const qs=(d.questions||[]).map(n=>`<a href="#" data-goq="${+n}">#${+n}</a>`).join(' ');
+ return `<div class="card depcard s-${esc(d.status)}${wf?' needs':''}" id="dep-${esc(d.deployment)}">
+ <h3>${esc(d.target||'Deployment')} <span class="dstat ${depState(d)}">${esc(depLabel(d))}</span><span class="meta" style="font-weight:400">${esc(d.deployment)}</span></h3>
+ <div class="depmeta">${d.started?`<span>started ${esc(depTime(d.started))}</span>`:''}<span>updated ${ago(d.received)}</span>
+  ${d.commit?`<span>commit <code>${esc(d.commit)}</code></span>`:''}${(d.branches||[]).length?`<span>${(d.branches||[]).map(b=>`<code>${esc(b)}</code>`).join(' ')}</span>`:''}
+  ${qs?`<span>questions ${qs}</span>`:''}</div>
+ <div class="depbar"><i style="width:${p}%"></i></div>
+ <ol class="depsteps">${st.map(x=>{const s=['done','running','failed','waiting'].includes(x.status)?x.status:'waiting';
+  const sg=(x.stages||[]).filter(g=>g&&typeof g==='object');
+  return `<li class="${s}"><span class="ic">${ICON[s]}</span><span>${esc(x.label||x.id||'')}${x.detail?` <span class="meta">· ${linkDocs(esc(String(x.detail)))}</span>`:''}</span>
+   <span class="when">${x.finished?esc(depTime(x.finished)):''}</span>
+   ${sg.length?`<div class="stages">${sg.map(g=>`<span class="stage ${['done','running','failed'].includes(g.status)?g.status:'waiting'}">${esc(g.name||'')}</span>`).join('')}</div>`:''}</li>`}).join('')}</ol>
+ ${wf?`<div class="depwait"><b>Needs you:</b> ${esc(wf.reason||'')}${wf.url&&/^https?:\/\//.test(wf.url)?` · <a href="${esc(wf.url)}" target="_blank" rel="noopener noreferrer">Open link</a>`:''}${wf.code?` · code <code>${esc(wf.code)}</code>`:''}</div>`:''}
+ ${er?`<div class="deperr"><b>Failed${er.step?' at '+esc(er.step):''}:</b> ${esc(er.message||'')}${er.log?` · log: ${linkDocs(esc(String(er.log)))}`:''}</div>`:''}
+ </div>`}
+function renderDeps(){$('#deplist').innerHTML=DEPS.length?DEPS.map(depCard).join(''):'<div class="empty">No deployments yet.</div>'}
+async function loadDeps(){
+ clearTimeout(depTimer);
+ try{DEPS=(await api('/api/deployments?limit=20')).deployments||[];renderDepStrip();if(view==='deploys')renderDeps()}catch(e){}
+ depTimer=setTimeout(()=>{if(!document.hidden)loadDeps();else depTimer=setTimeout(loadDeps,5000)},DEPS.some(depActive)||view==='deploys'?3000:15000)}
+$('#deps').onclick=e=>{const b=e.target.closest('[data-dep]');if(!b)return;showView('deploys');
+ setTimeout(()=>{const c=document.getElementById('dep-'+b.dataset.dep);if(c)c.scrollIntoView({block:'start',behavior:'smooth'})},150)};
+$('#deplist').onclick=e=>{const a=e.target.closest('[data-goq]');if(!a)return;e.preventDefault();
+ expanded.add(+a.dataset.goq);filter='all';store('qa-filter','all');tabs();showView('questions')};
+loadDeps();
 // Markdown documents (.md) open in a pop-up, laid out like a page, instead of as plain text.
 const DOCMETA={};
 function noteDocs(list){for(const d of list||[])DOCMETA[d.id]=Object.assign(DOCMETA[d.id]||{},d)}

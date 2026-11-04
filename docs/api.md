@@ -21,6 +21,7 @@ Every request needs the board key, as `?key=KEY` or an `X-QA-Key: KEY` header. T
 | `list_documents` | `query`, `question_id`, `include_archived`, `limit` | Lists or searches documents |
 | `get_document` | `id`, `version`, `max_chars`, `as_base64` | Details, history and content |
 | `archive_document` | `id`, `restore` | Hides or restores a document. Nothing is deleted. |
+| `deployment_progress` | `deployment`, `status`, `target`, `step`, `steps`, `progress`, `questions`, `branches`, `commit`, `started`, `updated`, `waitingFor`, `error` | Reports a deployment's whole state (see below) |
 | `needs_attention` | `reason`, `url`, `code` | Raises the "a person is needed" banner |
 | `attention_cleared` | — | Clears it |
 
@@ -47,6 +48,8 @@ The exact schemas are in `TOOLS` in [`server/qaboard.py`](../server/qaboard.py).
 | `GET /api/docs/ID/download[?v=N]`, `/view` | The file (as an attachment, or inline for safe types) |
 | `POST /api/docs/ID/archive` | `{"archived": true/false}` |
 | `GET /api/live?lines=N`, `POST /api/live` | Console snapshot (posted by the watcher) and the attention state |
+| `GET /api/deployments[?limit=20]`, `GET /api/deployments/ID` | Recent deployments, newest first, or one deployment |
+| `PUT /api/deployments/ID` (or `POST`) | Report a deployment's whole state. It replaces the earlier report for that ID. |
 | `POST /api/attention` | `{"reason","url","code","by"}` or `{"clear": true}` |
 
 Posts (questions and answers) are Markdown: **bold** / __bold__, *italic* / _italic_, ~~strikethrough~~,
@@ -68,6 +71,52 @@ Upload a file from a shell:
 
 ```bash
 curl --data-binary @report.pdf "http://127.0.0.1:8787/api/docs?filename=report.pdf&author=alice&key=KEY"
+```
+
+## Deployment progress
+
+Claude (with `deployment_progress`) or a script reports a deployment by sending its **whole state**
+every time a step starts or finishes. A report replaces the earlier one for the same ID, so a missed
+report does no harm. The board shows a progress bar under the tabs on every page while a deployment
+is running, waiting, or finished in the last 15 minutes. The full step list is on the **Deploys** tab.
+
+```json
+{
+  "deployment": "dep-20261104-0933",
+  "target": "www-dev",
+  "status": "running",
+  "step": "pipeline",
+  "progress": 0.62,
+  "questions": [86, 87],
+  "branches": ["fix/font"],
+  "commit": "483302e",
+  "started": "2026-11-04T09:21:40+02:00",
+  "updated": "2026-11-04T09:41:12+02:00",
+  "steps": [
+    { "id": "tests",    "label": "Server tests", "status": "done", "finished": "2026-11-04T09:28:21+02:00", "detail": "756 passed" },
+    { "id": "pipeline", "label": "AWS pipeline", "status": "running",
+      "stages": [ { "name": "Build", "status": "done" }, { "name": "Deploy", "status": "running" } ] },
+    { "id": "announce", "label": "Answer the questions", "status": "waiting" }
+  ],
+  "waitingFor": null,
+  "error": null
+}
+```
+
+- **`status`** (for the deployment, each step and each stage): `running`, `waiting`, `done` or `failed`.
+- **`progress`** (0 to 1) is optional. Without it, the board counts finished steps, and a running
+  step's stages count as fractions of that step.
+- **`waitingFor`**: `{reason, url, code}`, the same as `needs_attention`. It raises the board's
+  "Needs you" banner, and sending `null` clears it again.
+- **`error`**: `{step, message, log}`. Upload the full log as a document and refer to it as
+  `"doc 812"` so it becomes a link.
+- **Questions** listed in `questions` link to those questions.
+- A running deployment with no report for 15 minutes is shown as "no update".
+
+From a shell:
+
+```bash
+curl -X PUT --data-binary @state.json "http://127.0.0.1:8787/api/deployments/dep-20261104-0933?key=KEY"
 ```
 
 ## Command line
