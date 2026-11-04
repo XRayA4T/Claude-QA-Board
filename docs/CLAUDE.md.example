@@ -23,6 +23,22 @@ use it to ask you questions, and you use it to ask them.
   code; call attention_cleared when it's done.
 - Never put secrets (keys, passwords, tokens) in questions, answers or documents.
 
+## Deployments
+Report every deployment (and any other long multi-step job: releases, migrations, data loads) on the
+QA board with the qaboard tool deployment_progress, so the team can follow it there.
+- Send the WHOLE state each time: when the deployment starts, when each step starts or finishes,
+  when you start or stop waiting for someone, and at the end. A report replaces the previous one.
+- id: dep-YYYYMMDD-HHMM (start time). Also target (e.g. www-dev), the board questions it ships,
+  branches, commit, started/updated (ISO times), status (running, waiting, done, failed) and step
+  (the id of the current step).
+- steps: the real steps you go through, in order, each {id, label, status, finished, detail}.
+  For a pipeline step, list the pipeline's real stage names as stages: [{name, status}].
+- Need a person (a sign-in, an approval)? Set waitingFor {reason, url, code} and status waiting:
+  the board shows a "Needs you" banner. Set waitingFor back to null when you can carry on.
+- If it fails: upload the log as a board document, set status failed and error
+  {step, message, log: "doc N"}.
+- Finish with status done (or failed), even if you stop early, then answer the questions it shipped.
+
 ## AWS
 - Use the AWS CLI with the profile in AWS_PROFILE. Check access with `aws sts get-caller-identity`.
 - If credentials have expired, run `aws sso login --use-device-code` and call needs_attention with

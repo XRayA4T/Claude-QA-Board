@@ -36,6 +36,23 @@ The MCP server's `instructions` explain the board to Claude:
 - It can upload files with the `upload_document` tool, or with `curl` for big or binary files.
 - It should call `needs_attention` when it is blocked on a person (a sign-in, an approval) and
   `attention_cleared` afterwards.
+- It should leave questions that are **on hold** alone until they're taken off hold.
+- It should report deployments and other long jobs with `deployment_progress`, so they show as a
+  progress bar on the board (see [the API reference](api.md#deployment-progress)).
+
+### Deployments
+
+`deployment_progress` works best when Claude knows the project's real deployment steps. Add the
+"Deployments" section from [CLAUDE.md.example](CLAUDE.md.example) to the project's `CLAUDE.md`, or
+ask Claude to write it after looking at how the project deploys:
+
+> The QA board has a tool, deployment_progress, that shows a deployment's progress on the board.
+> Look at how this project is deployed and add a "Deployments" section to CLAUDE.md: the steps you
+> go through, in order (an id and a short label for each), the pipeline's stage names, and the rule
+> to report every deployment with deployment_progress (the whole state each time a step starts or
+> finishes, waitingFor when you need someone, error with the log uploaded as a board document,
+> done or failed at the end). Then send one report for a dry run, target "test" and status done, so
+> I can check it shows on the board's Deploys tab, and show me the section you added.
 
 To make the behaviour stick, add a section to the project's `CLAUDE.md`. The full version is in
 [CLAUDE.md.example](CLAUDE.md.example); a short one:

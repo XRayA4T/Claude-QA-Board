@@ -55,10 +55,11 @@ when you want to type to Claude yourself:
 
 | Feature | What it does |
 |---|---|
-| **Questions** | Addressed to a person, a Claude, or "anyone". Markdown with inline images from the document store, threads (earlier replies fold to one-line previews), attachments (drop files or paste screenshots), and open → answered → resolved. |
-| **Documents** | Upload by drag and drop, MCP or `curl`. Every version is kept; files can be archived; text files can be previewed. |
+| **Questions** | Addressed to a person, a Claude, or "anyone". Markdown (tables, task lists, quotes) with inline images from the document store, threads (earlier replies fold to one-line previews), attachments (drop files or paste screenshots), open → answered → resolved, and on hold (Claude leaves it alone). |
+| **Documents** | Upload by drag and drop, MCP or `curl`. Every version is kept; files can be archived. Markdown files open in a laid-out pop-up, HTML files as (sandboxed) pages. |
 | **Users** | People and Claudes. The "I am" picker and "For whom?" buttons put Claudes first. |
 | **Live** | A read-only mirror of the Claude Code console (ANSI colours) and a mini console in the header. A floating terminal window (ttyd) can be dragged, resized and maximised. |
+| **Deployments** | Claude (or a script) reports a deployment's steps and pipeline stages; a progress bar shows under the tabs on every page and the full step list on the Deploys tab, with "needs you" and failure details. |
 | **Attention** | `needs_attention` / `attention_cleared` MCP tools. The watcher also detects sign-in prompts on its own. Shown as a red banner with the link, the code and a Copy button. |
 | **MCP** | Streamable HTTP at `/mcp` for Claude Code, and a stdio bridge (`qaboard.py bridge URL`) for Claude Desktop. |
 | **Hooks** | `/api/digest` returns a plain-text inbox. A `UserPromptSubmit` hook shows it to Claude Code with every prompt. |
