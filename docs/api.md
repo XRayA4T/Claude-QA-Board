@@ -112,6 +112,9 @@ is running, waiting, or finished in the last 15 minutes. The full step list is o
   `"doc 812"` so it becomes a link.
 - **Questions** listed in `questions` link to those questions.
 - A running deployment with no report for 15 minutes is shown as "no update".
+- Clicking a bar opens that deployment on the Deploys tab. Clicking the **done ✕** (or **failed ✕**)
+  label hides a finished deployment from the bar in that browser. It stays on the Deploys tab, and a
+  newer report for it shows the bar again.
 
 From a shell:
 

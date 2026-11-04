@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.15.0"
+VERSION = "1.15.1"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -1438,6 +1438,8 @@ main>section{padding-top:14px}
 .deppct{font-variant-numeric:tabular-nums;color:var(--muted);min-width:3.2em;text-align:right}
 .dstat{font-size:13px;font-weight:700;border-radius:99px;padding:0 8px;border:1px solid;white-space:nowrap}
 .dstat.running{color:var(--accent)}.dstat.waiting,.dstat.needs{color:#b8860b}.dstat.done{color:var(--ans)}.dstat.failed{color:#e5484d}
+.depcard.focus{outline:2px solid var(--accent);outline-offset:2px}
+.dstat.hide{cursor:pointer}.dstat.hide:hover{background:var(--drop)}
 .depcard h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 4px}
 .depcard .depbar{height:12px;margin:10px 0 12px}
 .depsteps{list-style:none;padding:0;margin:0;display:grid;gap:6px}
@@ -1619,7 +1621,7 @@ $('#me').onchange=()=>{store('qa-me',$('#me').value);refresh()};
 
 // ---- views
 let view=['#docs','#live','#users','#deploys'].includes(location.hash)?location.hash.slice(1):(store('qa-view')||'questions');
-function showView(v){view=v;store('qa-view',v);
+function showView(v){view=v;store('qa-view',v);if(v!=='deploys')focusDep=null;
  document.querySelectorAll('#views button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
  $('#v-questions').hidden=v!=='questions';$('#v-docs').hidden=v!=='docs';$('#v-live').hidden=v!=='live';$('#v-users').hidden=v!=='users';$('#v-deploys').hidden=v!=='deploys';refresh()}
 $('#views').onclick=e=>{const b=e.target.closest('button');if(b&&b.dataset.v)showView(b.dataset.v)};
@@ -1959,7 +1961,12 @@ const drop=$('#drop');
 drop.addEventListener('drop',e=>uploadMany([...e.dataTransfer.files]));
 let verFor=null;
 // ---- deployments: a progress bar under the tabs while one is running (or just finished), full detail on Deploys
-let DEPS=[],depTimer=null;
+let DEPS=[],depTimer=null,focusDep=null;
+// Finished deployments hidden from the bar under the tabs (per browser): {id: the report time that was hidden}.
+// A newer report for the same deployment shows it again.
+let HIDDEN={};try{HIDDEN=JSON.parse(store('qa-dephidden')||'{}')||{}}catch(e){HIDDEN={}}
+function hideDep(d){HIDDEN[d.deployment]=d.received;const k=Object.keys(HIDDEN);
+ if(k.length>50)for(const x of k.slice(0,k.length-50))delete HIDDEN[x];store('qa-dephidden',JSON.stringify(HIDDEN))}
 function depTime(t){const d=t?new Date(t):null;return d&&!isNaN(d)?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}
 function depPct(d){
  if(typeof d.progress==='number')return Math.round(d.progress*100);
@@ -1974,16 +1981,17 @@ function depState(d){return d.waitingFor?'needs':d.status}
 function depLabel(d){const s=depState(d),stale=d.status==='running'&&Date.now()/1000-d.received>900;
  return s==='needs'?'needs you':stale?'no update '+ago(d.received).replace(' ago',''):s}
 function depActive(d){return d.status==='running'||d.status==='waiting'||d.waitingFor||Date.now()/1000-d.received<900}
-function renderDepStrip(){const act=DEPS.filter(depActive).slice(0,3),box=$('#deps');
+function renderDepStrip(){const act=DEPS.filter(d=>depActive(d)&&HIDDEN[d.deployment]!==d.received).slice(0,3),box=$('#deps');
  box.hidden=!act.length;
  box.innerHTML=act.map(d=>{const p=depPct(d);return `<button class="deprow s-${esc(d.status)}${d.waitingFor?' needs':''}" data-dep="${esc(d.deployment)}" title="Open on the Deploys tab">
   <span class="depname">${esc(d.target||d.deployment)}</span><span class="depbar"><i style="width:${p}%"></i></span>
   <span class="deppct">${p}%</span><span class="depstep">${esc(depCur(d)||(d.status==='done'?'finished '+depTime(d.updated):''))}</span>
-  <span class="dstat ${depState(d)}">${esc(depLabel(d))}</span></button>`}).join('')}
+  ${d.status==='done'||d.status==='failed'?`<span class="dstat ${depState(d)} hide" data-hide="${esc(d.deployment)}" title="Hide from the bar (still on the Deploys tab)">${esc(depLabel(d))} ✕</span>`
+    :`<span class="dstat ${depState(d)}">${esc(depLabel(d))}</span>`}</button>`}).join('')}
 const ICON={done:'✓',running:'●',failed:'✕',waiting:'○'};
 function depCard(d){const p=depPct(d),st=(d.steps||[]).filter(x=>x&&typeof x==='object'),wf=d.waitingFor,er=d.error;
  const qs=(d.questions||[]).map(n=>`<a href="#" data-goq="${+n}">#${+n}</a>`).join(' ');
- return `<div class="card depcard s-${esc(d.status)}${wf?' needs':''}" id="dep-${esc(d.deployment)}">
+ return `<div class="card depcard s-${esc(d.status)}${wf?' needs':''}${d.deployment===focusDep?' focus':''}" id="dep-${esc(d.deployment)}">
  <h3>${esc(d.target||'Deployment')} <span class="dstat ${depState(d)}">${esc(depLabel(d))}</span><span class="meta" style="font-weight:400">${esc(d.deployment)}</span></h3>
  <div class="depmeta">${d.started?`<span>started ${esc(depTime(d.started))}</span>`:''}<span>updated ${ago(d.received)}</span>
   ${d.commit?`<span>commit <code>${esc(d.commit)}</code></span>`:''}${(d.branches||[]).length?`<span>${(d.branches||[]).map(b=>`<code>${esc(b)}</code>`).join(' ')}</span>`:''}
@@ -2002,8 +2010,13 @@ async function loadDeps(){
  clearTimeout(depTimer);
  try{DEPS=(await api('/api/deployments?limit=20')).deployments||[];renderDepStrip();if(view==='deploys')renderDeps()}catch(e){}
  depTimer=setTimeout(()=>{if(!document.hidden)loadDeps();else depTimer=setTimeout(loadDeps,5000)},DEPS.some(depActive)||view==='deploys'?3000:15000)}
-$('#deps').onclick=e=>{const b=e.target.closest('[data-dep]');if(!b)return;showView('deploys');
- setTimeout(()=>{const c=document.getElementById('dep-'+b.dataset.dep);if(c)c.scrollIntoView({block:'start',behavior:'smooth'})},150)};
+$('#deps').onclick=e=>{
+ const h=e.target.closest('[data-hide]');
+ if(h){e.stopPropagation();const d=DEPS.find(x=>x.deployment===h.dataset.hide);if(d){hideDep(d);renderDepStrip()}return}
+ const b=e.target.closest('[data-dep]');if(b)goToDep(b.dataset.dep)};
+function goToDep(id){   // the Deploys tab, scrolled to that deployment's card, which is outlined
+ focusDep=id;showView('deploys');renderDeps();
+ const c=document.getElementById('dep-'+id);if(c)c.scrollIntoView({block:'start'})}
 $('#deplist').onclick=e=>{const a=e.target.closest('[data-goq]');if(!a)return;e.preventDefault();
  expanded.add(+a.dataset.goq);filter='all';store('qa-filter','all');tabs();showView('questions')};
 loadDeps();
