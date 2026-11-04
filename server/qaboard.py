@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.15.1"
+VERSION = "1.16.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -1357,6 +1357,7 @@ details.new summary{cursor:pointer;font-weight:600}
 .pill{display:inline-block;font-size:14.4px;font-weight:600;border-radius:99px;padding:0 8px;margin-right:6px;border:1px solid}
 .open{color:var(--open)}.answered{color:var(--ans)}.resolved{color:var(--res)}.on_hold{color:var(--muted);border-style:dashed!important}
 .card.q.held{opacity:.8}
+.drafted{color:var(--accent);font-weight:600}
 .body{white-space:pre-wrap;margin:10px 0 0;overflow-wrap:anywhere}
 .md{white-space:normal;line-height:1.55}
 .md p{margin:0 0 8px}
@@ -1779,7 +1780,7 @@ $('#tabs').onclick=e=>{const f=e.target.dataset.f;if(f){filter=f;store('qa-filte
 function card(q){const open=expanded.has(q.id);const forMe=me()&&q.status==='open'&&(q.to===me()||q.to==='anyone')&&q.author!==me();
  const docs=q.documents||[];
  let h=`<div class="card q ${forMe?'forme':''}${q.status==='on_hold'?' held':''}" data-id="${q.id}"><h3 data-toggle="${q.id}"><span class="pill ${q.status}">${q.status.replace('_',' ')}</span>#${q.id} ${esc(q.title)}</h3>
- <div class="meta">${esc(q.author)} → ${esc(q.to)} · ${ago(q.created)} · ${q.answers.length} answer${q.answers.length===1?'':'s'}${docs.length?` · ${docs.length} document${docs.length===1?'':'s'}`:''}</div>`;
+ <div class="meta">${esc(q.author)} → ${esc(q.to)} · ${ago(q.created)} · ${q.answers.length} answer${q.answers.length===1?'':'s'}${docs.length?` · ${docs.length} document${docs.length===1?'':'s'}`:''}${DRAFTS['a'+q.id]?' · <span class="drafted" title="Your unsent answer is kept in this browser">✎ your draft</span>':''}</div>`;
  if(open){if(q.body)h+=`<div class="body md">${md(q.body)}</div>`;
   if(docs.length)h+=`<div class="att">Attached: ${docs.map(d=>`<a href="${url('/api/docs/'+d.id+'/view')}" target="_blank" rel="noopener">${esc(d.title)}</a>`).join('')}</div>`;
   const n=q.answers.length,early=a=>q.answers.indexOf(a)<n-SHOW_LAST;
@@ -1889,11 +1890,20 @@ async function load(){
   QUESTIONS=questions;questions.forEach(q=>noteDocs(q.documents||[]));
   $('#list').innerHTML=questions.length?questions.map(card).join(''):'<div class="empty">No questions here.</div>';
   for(const[id,v]of Object.entries(drafts)){const t=document.querySelector(`[data-draft="${id}"]`);if(t)t.value=v}
+  document.querySelectorAll('[data-draft]').forEach(t=>{const d=DRAFTS['a'+t.dataset.draft];if(!t.value&&d)t.value=d.v});
   if(refocus){const t=document.querySelector(`[data-draft="${refocus}"]`);if(t)t.focus()}
   const n=questions.filter(q=>q.status==='open').length;document.title=(n?'('+n+') ':'')+BRAND+' · Q&A Board';
  }catch(e){$('#list').innerHTML=`<div class="empty err">Could not reach the board: ${esc(e.message)}</div>`}}
-let attachTo=null,lastActivity=0,QUESTIONS=[];
+let attachTo=null,lastActivity=0,QUESTIONS=[],DRAFTS={};
+// ---- drafts: what you've typed in an answer box or the Ask form is kept in this browser until you post it
+// (or for 14 days), so a reload, a crash or a closed tab doesn't lose it
+function draftsGet(){try{const d=JSON.parse(store('qa-drafts')||'{}')||{},old=Date.now()-14*864e5;
+ for(const k in d)if(!d[k]||!d[k].ts||d[k].ts<old)delete d[k];return d}catch(e){return {}}}
+function draftSet(k,v){const d=draftsGet();if(v&&v.trim())d[k]={v,ts:Date.now()};else delete d[k];
+ try{store('qa-drafts',JSON.stringify(d))}catch(e){}DRAFTS=d}
+DRAFTS=draftsGet();
 ['focusin','input','keydown'].forEach(ev=>$('#list').addEventListener(ev,()=>{lastActivity=Date.now()}));
+$('#list').addEventListener('input',e=>{const t=e.target;if(t.dataset&&t.dataset.draft)draftSet('a'+t.dataset.draft,t.value)});
 $('#list').onclick=async e=>{const t=e.target;
  if(t.dataset.toggle){const id=+t.dataset.toggle;expanded.has(id)?expanded.delete(id):expanded.add(id);load();return}
  const uf=t.closest&&t.closest('[data-unfold]');
@@ -1905,7 +1915,7 @@ $('#list').onclick=async e=>{const t=e.target;
  if(!me()){alertBox('Choose who you are next to "I am" first.');return}
  if(t.dataset.attach){attachTo=+t.dataset.attach;$('#verfile').dataset.mode='attach';$('#verfile').click();return}
  if(t.dataset.answer){const ta=document.querySelector(`[data-draft="${t.dataset.answer}"]`);if(!ta.value.trim())return;
-  try{await api(`/api/questions/${t.dataset.answer}/answers`,{body:ta.value,author:me()});ta.value='';ta.blur();load()}catch(err){alertBox(err.message)}}
+  try{await api(`/api/questions/${t.dataset.answer}/answers`,{body:ta.value,author:me()});ta.value='';draftSet('a'+t.dataset.answer,'');ta.blur();load()}catch(err){alertBox(err.message)}}
  if(t.dataset.status){const[id,s]=t.dataset.status.split(':');try{await api(`/api/questions/${id}/status`,{status:s});load()}catch(err){alertBox(err.message)}}};
 function alertBox(m){$('#perr').textContent=m;$('#newbox').open=true;setTimeout(()=>$('#perr').textContent='',4000)}
 let qFiles=[];
@@ -1924,10 +1934,14 @@ async function postQuestion(to){
   for(const [i,f] of qFiles.entries()){$('#qfilelist').textContent=`Attaching ${f.name} (${i+1} of ${qFiles.length})…`;
    try{await upload(f,{question:q.id})}catch(err){failed.push(f.name+': '+err.message)}}
   qFiles=[];showQFiles();
-  $('#title').value=$('#qbody').value=$('#to').value='';$('#anywarn').hidden=true;renderToPills();
+  $('#title').value=$('#qbody').value=$('#to').value='';draftSet('ask-title','');draftSet('ask-body','');$('#anywarn').hidden=true;renderToPills();
   if(failed.length)alertBox(`Question #${q.id} was posted, but these files weren't attached: ${failed.join('; ')}`);else $('#newbox').open=false;
   expanded.add(q.id);load()}catch(e){alertBox(e.message)}
  finally{btns.forEach(b=>b.disabled=false)}}
+// the Ask form's draft
+['title','qbody'].forEach(id=>{const k=id==='title'?'ask-title':'ask-body',d=DRAFTS[k];
+ if(d&&!$('#'+id).value){$('#'+id).value=d.v;$('#newbox').open=true}
+ $('#'+id).addEventListener('input',e=>draftSet(k,e.target.value))});
 $('#post').onclick=()=>{if(!me())return alertBox('Choose who you are next to "I am" first.');
  if(!$('#title').value.trim())return alertBox('Write the question first.');
  const to=$('#to').value.trim().toLowerCase();
@@ -2073,7 +2087,7 @@ document.addEventListener('paste',async e=>{
    if(f.size>maxMB*1048576){alertBox(`${f.name} is larger than the ${maxMB} MB limit.`);continue}
    try{const d=await upload(f,{question:qid});
     if(ta){const ins=`![${f.name}](/api/docs/${d.id}/view)\n`,a=ta.selectionStart??ta.value.length,b=ta.selectionEnd??a;
-     ta.setRangeText((a>0&&ta.value[a-1]!=='\n'?'\n':'')+ins,a,b,'end');ta.focus();lastActivity=Date.now()}
+     ta.setRangeText((a>0&&ta.value[a-1]!=='\n'?'\n':'')+ins,a,b,'end');ta.focus();lastActivity=Date.now();draftSet('a'+qid,ta.value)}
    }catch(err){alertBox(`${f.name}: ${err.message}`)}}
   return}
  uploadMany(files)});
