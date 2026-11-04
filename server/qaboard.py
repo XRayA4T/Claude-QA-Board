@@ -38,9 +38,9 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.13.0"
+VERSION = "1.14.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
-STATUSES = ("open", "answered", "resolved")
+STATUSES = ("open", "answered", "resolved", "on_hold")
 
 TEXT_MIMES = {
     "application/json", "application/xml", "application/javascript", "application/x-javascript",
@@ -211,8 +211,14 @@ class Store:
             return self.get(qid)
 
     def set_status(self, qid, status):
+        """status: open, answered, resolved, on_hold - or reopen: back to answered if it has answers,
+        otherwise open (used to take a question off hold or reopen a resolved one)."""
+        if status == "reopen":
+            with self.lock:
+                n = self.db.execute("SELECT COUNT(*) FROM answers WHERE question_id=?", (qid,)).fetchone()[0]
+            status = "answered" if n else "open"
         if status not in STATUSES:
-            raise ValueError("status must be one of %s" % ", ".join(STATUSES))
+            raise ValueError("status must be one of %s, or reopen" % ", ".join(STATUSES))
         with self.lock:
             cur = self.db.execute(
                 "UPDATE questions SET status=?, updated=? WHERE id=?", (status, time.time(), qid)
@@ -236,7 +242,7 @@ class Store:
             sql += " AND status=?"
             args.append(status)
         elif status not in (None, "", "all"):
-            raise ValueError("status must be open, answered, resolved, unresolved or all")
+            raise ValueError("status must be open, answered, resolved, on_hold, unresolved or all")
         if to:
             sql += " AND to_whom IN (?, 'anyone')"
             args.append(clean_name(to))
@@ -539,8 +545,8 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "status": {"type": "string",
-                           "enum": ["unresolved", "open", "answered", "resolved", "all"],
-                           "description": "Default 'unresolved' (open + answered)"},
+                           "enum": ["unresolved", "open", "answered", "resolved", "on_hold", "all"],
+                           "description": "Default 'unresolved' (open + answered; on-hold questions are left out)"},
                 "to": {"type": "string", "description": "Only questions addressed to this name (or anyone)"},
                 "limit": {"type": "integer", "description": "Default 20"},
             },
@@ -564,10 +570,21 @@ TOOLS = [
     {
         "name": "resolve_question",
         "description": "Mark a question resolved (usually done by whoever asked it, once satisfied). "
-                       "Use reopen=true to reopen it.",
+                       "Use reopen=true to reopen it (also takes it off hold).",
         "inputSchema": {
             "type": "object",
             "properties": {"id": {"type": "integer"}, "reopen": {"type": "boolean"}},
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "hold_question",
+        "description": "Put a question on hold: it stays on the board but drops out of everyone's inbox, and "
+                       "nobody (you included) should answer, chase or ask about it until it is taken off hold. "
+                       "Only do this when a person asks you to. release=true takes it off hold.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"id": {"type": "integer"}, "release": {"type": "boolean"}},
             "required": ["id"],
         },
     },
@@ -667,6 +684,8 @@ INSTRUCTIONS = (
     "Answer questions addressed to you with concrete, verified information. "
     "Put documents the team should be able to read (specs, reports, notes, screenshots) in the document store "
     "with upload_document, and link them from questions or answers as 'doc <id>'. "
+    "A question with status on_hold has been put on hold by the team: don't answer, chase, follow up on or ask "
+    "about it (not even your own) until it is taken off hold; it is left out of your inbox until then. "
     "Posts are Markdown; to show an image (PNG, JPEG, GIF, WebP or SVG) from the document store in a post, "
     "write ![caption](/api/docs/<id>/view) (add ?v=<n> for an older version). "
     "Whenever you stop to wait for a person in your session (a go-ahead to merge or deploy, a sign-in such as "
@@ -701,13 +720,20 @@ def call_tool(store, who, name, args, base_url=""):
         qs = store.list(args.get("status") or "unresolved", args.get("to"), args.get("limit") or 20)
         return [_text(json.dumps(qs, indent=1) if qs else "No matching questions.")]
     if name == "get_question":
-        return [_text(json.dumps(store.get(int(args["id"])), indent=1))]
+        q = store.get(int(args["id"]))
+        hold = ("This question is ON HOLD: don't answer, follow up on or ask about it until it is taken off hold.\n"
+                if q["status"] == "on_hold" else "")
+        return [_text(hold + json.dumps(q, indent=1))]
     if name == "answer_question":
         q = store.answer(int(args["id"]), args.get("answer"), who)
         return [_text("Answer added to #%d.\n%s" % (q["id"], json.dumps(q, indent=1)))]
     if name == "resolve_question":
-        q = store.set_status(int(args["id"]), "open" if args.get("reopen") else "resolved")
+        q = store.set_status(int(args["id"]), "reopen" if args.get("reopen") else "resolved")
         return [_text("Question #%d is now %s." % (q["id"], q["status"]))]
+    if name == "hold_question":
+        q = store.set_status(int(args["id"]), "reopen" if args.get("release") else "on_hold")
+        return [_text("Question #%d is now %s." % (q["id"], q["status"].replace("_", " ")) +
+                      ("" if args.get("release") else " Leave it alone until someone takes it off hold."))]
 
     if name == "upload_document":
         if args.get("content_base64"):
@@ -1215,7 +1241,8 @@ details.new summary{cursor:pointer;font-weight:600}
 .q h3{margin:0;font-size:19.2px;cursor:pointer}
 .meta{color:var(--muted);font-size:15.6px;margin-top:2px}
 .pill{display:inline-block;font-size:14.4px;font-weight:600;border-radius:99px;padding:0 8px;margin-right:6px;border:1px solid}
-.open{color:var(--open)}.answered{color:var(--ans)}.resolved{color:var(--res)}
+.open{color:var(--open)}.answered{color:var(--ans)}.resolved{color:var(--res)}.on_hold{color:var(--muted);border-style:dashed!important}
+.card.q.held{opacity:.8}
 .body{white-space:pre-wrap;margin:10px 0 0;overflow-wrap:anywhere}
 .md{white-space:normal;line-height:1.55}
 .md p{margin:0 0 8px}
@@ -1594,12 +1621,12 @@ let filter=store('qa-filter')||'unresolved';const expanded=new Set();
 const SHOW_LAST=2,openAns=new Set(),closedAns=new Set();
 function peek(t){t=String(t||'').replace(/!\[([^\]]*)\]\([^)]*\)/g,'[image: $1]').replace(/\[([^\]]+)\]\([^)]*\)/g,'$1')
  .replace(/```[\s\S]*?(```|$)/g,' [code] ').replace(/^\s*#+\s+/gm,'').replace(/[`*]/g,'').replace(/^\s*&gt;\s?|^\s*>\s?/gm,'').replace(/\s+/g,' ').trim();return t.length>140?t.slice(0,137)+'…':t}
-const FILTERS=[['unresolved','Unresolved'],['open','Open'],['answered','Answered'],['resolved','Resolved'],['all','All']];
+const FILTERS=[['unresolved','Unresolved'],['open','Open'],['answered','Answered'],['on_hold','On hold'],['resolved','Resolved'],['all','All']];
 function tabs(){$('#tabs').innerHTML=FILTERS.map(([k,l])=>`<button data-f="${k}" class="${k===filter?'on':''}">${l}</button>`).join('');}
 $('#tabs').onclick=e=>{const f=e.target.dataset.f;if(f){filter=f;store('qa-filter',f);tabs();load()}};
 function card(q){const open=expanded.has(q.id);const forMe=me()&&q.status==='open'&&(q.to===me()||q.to==='anyone')&&q.author!==me();
  const docs=q.documents||[];
- let h=`<div class="card q ${forMe?'forme':''}" data-id="${q.id}"><h3 data-toggle="${q.id}"><span class="pill ${q.status}">${q.status}</span>#${q.id} ${esc(q.title)}</h3>
+ let h=`<div class="card q ${forMe?'forme':''}${q.status==='on_hold'?' held':''}" data-id="${q.id}"><h3 data-toggle="${q.id}"><span class="pill ${q.status}">${q.status.replace('_',' ')}</span>#${q.id} ${esc(q.title)}</h3>
  <div class="meta">${esc(q.author)} → ${esc(q.to)} · ${ago(q.created)} · ${q.answers.length} answer${q.answers.length===1?'':'s'}${docs.length?` · ${docs.length} document${docs.length===1?'':'s'}`:''}</div>`;
  if(open){if(q.body)h+=`<div class="body md">${md(q.body)}</div>`;
   if(docs.length)h+=`<div class="att">Attached: ${docs.map(d=>`<a href="${url('/api/docs/'+d.id+'/view')}" target="_blank" rel="noopener">${esc(d.title)}</a>`).join('')}</div>`;
@@ -1614,7 +1641,9 @@ function card(q){const open=expanded.has(q.id);const forMe=me()&&q.status==='ope
    else h+=`<div class="ans"><div class="meta"><a href="#" class="chev" data-fold="${a.id}" title="Fold this reply">▾</a> ${esc(a.author)} · ${ago(a.created)}</div><div class="body md" style="margin-top:4px">${md(a.body)}</div></div>`}
   h+=`<div class="row"><textarea data-draft="${q.id}" placeholder="Write an answer. Paste a screenshot (Ctrl+V) to attach it and show it here."></textarea></div>
   <div class="row" style="justify-content:flex-end"><button data-attach="${q.id}" style="flex:0 0 auto">Attach file</button><button class="primary" data-answer="${q.id}" style="flex:0 0 auto">Answer</button>
-  ${q.status==='resolved'?`<button data-status="${q.id}:open" style="flex:0 0 auto">Reopen</button>`:`<button data-status="${q.id}:resolved" style="flex:0 0 auto">Mark resolved</button>`}</div>`}
+  ${q.status==='on_hold'?`<button data-status="${q.id}:reopen" style="flex:0 0 auto" title="Back in everyone's inbox; Claude picks it up again">Take off hold</button>`
+    :q.status!=='resolved'?`<button data-status="${q.id}:on_hold" style="flex:0 0 auto" title="Out of everyone's inbox; Claude leaves it alone until it's taken off hold">Put on hold</button>`:''}
+  ${q.status==='resolved'?`<button data-status="${q.id}:reopen" style="flex:0 0 auto">Reopen</button>`:`<button data-status="${q.id}:resolved" style="flex:0 0 auto">Mark resolved</button>`}</div>`}
  return h+'</div>'}
 function linkDocs(html){return html.replace(/\bdoc (\d+)\b/gi,(m,id)=>`<a href="${url('/api/docs/'+id+'/view')}" target="_blank" rel="noopener">${m}</a>`)}
 // Markdown for posts (what Claude writes): **bold**, *italic*, `code`, ``` blocks, lists, # headings, links,

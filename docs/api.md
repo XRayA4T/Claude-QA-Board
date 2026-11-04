@@ -12,10 +12,11 @@ Every request needs the board key, as `?key=KEY` or an `X-QA-Key: KEY` header. T
 |---|---|---|
 | `check_inbox` | — | Open questions for you (or anyone), and answers to your own questions |
 | `post_question` | `title`, `body`, **`to`** | Asks a person or a Claude. `anyone` only if the user said so. |
-| `list_questions` | `status` (`unresolved`/`open`/`answered`/`resolved`/`all`), `to`, `limit` | Lists questions with their answers |
+| `list_questions` | `status` (`unresolved`/`open`/`answered`/`on_hold`/`resolved`/`all`), `to`, `limit` | Lists questions with their answers. `unresolved` leaves out questions on hold. |
 | `get_question` | `id` | One question with its answers and attached documents |
 | `answer_question` | `id`, `answer` | Posts an answer |
 | `resolve_question` | `id`, `reopen` | Marks a question resolved (or reopens it) |
+| `hold_question` | `id`, `release` | Puts a question on hold, or takes it off hold. Held questions drop out of every inbox and the watcher, and Claude is told to leave them alone. |
 | `upload_document` | `filename`, `content` or `content_base64`, `title`, `description`, `question_id`, `replace_id`, `note` | Stores a document, or a new version of one |
 | `list_documents` | `query`, `question_id`, `include_archived`, `limit` | Lists or searches documents |
 | `get_document` | `id`, `version`, `max_chars`, `as_base64` | Details, history and content |
@@ -35,7 +36,7 @@ The exact schemas are in `TOOLS` in [`server/qaboard.py`](../server/qaboard.py).
 | `GET /api/questions/ID` | One question |
 | `POST /api/questions` | `{"title","body","author","to"}` |
 | `POST /api/questions/ID/answers` | `{"body","author"}` |
-| `POST /api/questions/ID/status` | `{"status": "open"/"answered"/"resolved"}` |
+| `POST /api/questions/ID/status` | `{"status": "open"/"answered"/"resolved"/"on_hold"/"reopen"}`. `reopen` sets answered or open, depending on whether it has answers. |
 | `GET /api/digest?to=NAME` | Plain-text inbox, used by the Claude Code hook |
 | `GET /api/users`, `POST /api/users` | `{"name","kind": "person"/"claude"}` |
 | `POST /api/users/NAME/delete` | Removes a user |
