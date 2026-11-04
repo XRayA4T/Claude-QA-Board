@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.16.0"
+VERSION = "1.16.1"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -1702,12 +1702,17 @@ function renderMe(){
  const sel=$('#me'),cur=sel.value||store('qa-me')||'';const people=USERS.filter(u=>!isClaude(u));
  sel.innerHTML='<option value="">choose…</option>'+people.map(u=>`<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('');
  sel.value=people.some(u=>u.name===cur)?cur:''}
+// New questions are for the board's Claude by default (dev-claude, else the first Claude in the list),
+// until you pick someone else or clear the choice.
+let toTouched=false;
+function defaultTo(){const c=USERS.find(u=>u.name==='dev-claude')||USERS.find(isClaude);return c?c.name:''}
 function renderToPills(){
+ if(!$('#to').value&&!toTouched)$('#to').value=defaultTo();
  const cur=$('#to').value,box=$('#topills');
  box.innerHTML=USERS.map(u=>`<button type="button" class="topill${u.name===cur?' on':''}" data-to="${esc(u.name)}" aria-pressed="${u.name===cur}">${isClaude(u)?'<span class="cl">Claude</span>':''}${esc(u.name)}</button>`).join('')
   +`<button type="button" class="topill any${cur==='anyone'?' on':''}" data-to="anyone" aria-pressed="${cur==='anyone'}">anyone</button>`
   +(USERS.length?'':'<span class="meta">Add people in the Users tab.</span>')}
-$('#topills').onclick=e=>{const b=e.target.closest('button');if(!b)return;
+$('#topills').onclick=e=>{const b=e.target.closest('button');if(!b)return;toTouched=true;
  $('#to').value=b.dataset.to===$('#to').value?'':b.dataset.to;$('#anywarn').hidden=true;renderToPills()};
 function renderUsers(){
  const list=$('#userlist');
@@ -1934,7 +1939,7 @@ async function postQuestion(to){
   for(const [i,f] of qFiles.entries()){$('#qfilelist').textContent=`Attaching ${f.name} (${i+1} of ${qFiles.length})…`;
    try{await upload(f,{question:q.id})}catch(err){failed.push(f.name+': '+err.message)}}
   qFiles=[];showQFiles();
-  $('#title').value=$('#qbody').value=$('#to').value='';draftSet('ask-title','');draftSet('ask-body','');$('#anywarn').hidden=true;renderToPills();
+  $('#title').value=$('#qbody').value=$('#to').value='';toTouched=false;draftSet('ask-title','');draftSet('ask-body','');$('#anywarn').hidden=true;renderToPills();
   if(failed.length)alertBox(`Question #${q.id} was posted, but these files weren't attached: ${failed.join('; ')}`);else $('#newbox').open=false;
   expanded.add(q.id);load()}catch(e){alertBox(e.message)}
  finally{btns.forEach(b=>b.disabled=false)}}
@@ -1948,7 +1953,7 @@ $('#post').onclick=()=>{if(!me())return alertBox('Choose who you are next to "I 
  if(!to||to==='anyone'){$('#anywarn').hidden=false;$('#postany').focus();return}
  postQuestion(to)};
 $('#postany').onclick=()=>postQuestion('anyone');
-$('#chooseto').onclick=()=>{$('#anywarn').hidden=true;$('#to').value='';renderToPills();const b=$('#topills button');if(b)b.focus()};
+$('#chooseto').onclick=()=>{toTouched=true;$('#anywarn').hidden=true;$('#to').value='';renderToPills();const b=$('#topills button');if(b)b.focus()};
 
 // ---- documents
 let maxMB=20;
