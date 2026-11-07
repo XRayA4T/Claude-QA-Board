@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.16.1"
+VERSION = "1.17.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -1357,6 +1357,8 @@ details.new summary{cursor:pointer;font-weight:600}
 .pill{display:inline-block;font-size:14.4px;font-weight:600;border-radius:99px;padding:0 8px;margin-right:6px;border:1px solid}
 .open{color:var(--open)}.answered{color:var(--ans)}.resolved{color:var(--res)}.on_hold{color:var(--muted);border-style:dashed!important}
 .card.q.held{opacity:.8}
+.card.q.dropover{outline:2px dashed var(--accent);outline-offset:2px;background:var(--drop)}
+.attmsg{margin-right:auto;align-self:center}
 .drafted{color:var(--accent);font-weight:600}
 .body{white-space:pre-wrap;margin:10px 0 0;overflow-wrap:anywhere}
 .md{white-space:normal;line-height:1.55}
@@ -1580,7 +1582,7 @@ a{color:var(--accent)}
 <div class="row" style="margin-bottom:10px"><input id="dsearch" placeholder="Search documents" type="search">
 <label class="meta" style="flex:0 0 auto;display:flex;gap:6px;align-items:center"><input type="checkbox" id="darch" style="width:auto"> show archived</label></div>
 <div id="docs"></div>
-<input type="file" id="verfile" hidden>
+<input type="file" id="verfile" hidden><input type="file" id="attfile" multiple hidden>
 </section>
 <datalist id="people"></datalist>
 <div class="mdshade" id="mdshade" hidden></div>
@@ -1797,8 +1799,8 @@ function card(q){const open=expanded.has(q.id);const forMe=me()&&q.status==='ope
   for(const a of q.answers){
    if(folded.includes(a))h+=`<div class="ans folded" data-unfold="${a.id}" title="Show this reply"><div class="meta"><span class="chev">▸</span> ${esc(a.author)} · ${ago(a.created)} <span class="peek">${esc(peek(a.body))}</span></div></div>`;
    else h+=`<div class="ans"><div class="meta"><a href="#" class="chev" data-fold="${a.id}" title="Fold this reply">▾</a> ${esc(a.author)} · ${ago(a.created)}</div><div class="body md" style="margin-top:4px">${md(a.body)}</div></div>`}
-  h+=`<div class="row"><textarea data-draft="${q.id}" placeholder="Write an answer. Paste a screenshot (Ctrl+V) to attach it and show it here."></textarea></div>
-  <div class="row" style="justify-content:flex-end"><button data-attach="${q.id}" style="flex:0 0 auto">Attach file</button><button class="primary" data-answer="${q.id}" style="flex:0 0 auto">Answer</button>
+  h+=`<div class="row"><textarea data-draft="${q.id}" placeholder="Write an answer. Drop files on the question, use Attach files, or paste a screenshot (Ctrl+V) to attach them and show them here."></textarea></div>
+  <div class="row" style="justify-content:flex-end"><span class="meta attmsg" data-attmsg="${q.id}"></span><button data-attach="${q.id}" style="flex:0 0 auto" title="Attach one or more files (or drop them on the question, or paste a screenshot)">Attach files</button><button class="primary" data-answer="${q.id}" style="flex:0 0 auto">Answer</button>
   ${q.status==='on_hold'?`<button data-status="${q.id}:reopen" style="flex:0 0 auto" title="Back in everyone's inbox; Claude picks it up again">Take off hold</button>`
     :q.status!=='resolved'?`<button data-status="${q.id}:on_hold" style="flex:0 0 auto" title="Out of everyone's inbox; Claude leaves it alone until it's taken off hold">Put on hold</button>`:''}
   ${q.status==='resolved'?`<button data-status="${q.id}:reopen" style="flex:0 0 auto">Reopen</button>`:`<button data-status="${q.id}:resolved" style="flex:0 0 auto">Mark resolved</button>`}</div>`}
@@ -1918,7 +1920,7 @@ $('#list').onclick=async e=>{const t=e.target;
   if(q)for(const a of q.answers){if(t.dataset.unfoldall){openAns.add(a.id);closedAns.delete(a.id)}else{openAns.delete(a.id);if(q.answers.indexOf(a)>=q.answers.length-SHOW_LAST)closedAns.delete(a.id)}}
   load();return}
  if(!me()){alertBox('Choose who you are next to "I am" first.');return}
- if(t.dataset.attach){attachTo=+t.dataset.attach;$('#verfile').dataset.mode='attach';$('#verfile').click();return}
+ if(t.dataset.attach){attachTo=+t.dataset.attach;$('#attfile').click();return}
  if(t.dataset.answer){const ta=document.querySelector(`[data-draft="${t.dataset.answer}"]`);if(!ta.value.trim())return;
   try{await api(`/api/questions/${t.dataset.answer}/answers`,{body:ta.value,author:me()});ta.value='';draftSet('a'+t.dataset.answer,'');ta.blur();load()}catch(err){alertBox(err.message)}}
  if(t.dataset.status){const[id,s]=t.dataset.status.split(':');try{await api(`/api/questions/${id}/status`,{status:s});load()}catch(err){alertBox(err.message)}}};
@@ -2085,21 +2087,42 @@ document.addEventListener('paste',async e=>{
  const files=pastedFiles(e);if(!files.length)return;    // plain text: let the browser paste it
  e.preventDefault();
  if(inAsk){$('#newbox').open=true;addQFiles(files);return}
- if(card){
-  if(!me()){alertBox('Choose who you are next to "I am" first.');return}
-  const qid=+card.dataset.id,ta=card.querySelector('[data-draft]');lastActivity=Date.now();
-  for(const f of files){
-   if(f.size>maxMB*1048576){alertBox(`${f.name} is larger than the ${maxMB} MB limit.`);continue}
-   try{const d=await upload(f,{question:qid});
-    if(ta){const ins=`![${f.name}](/api/docs/${d.id}/view)\n`,a=ta.selectionStart??ta.value.length,b=ta.selectionEnd??a;
-     ta.setRangeText((a>0&&ta.value[a-1]!=='\n'?'\n':'')+ins,a,b,'end');ta.focus();lastActivity=Date.now();draftSet('a'+qid,ta.value)}
-   }catch(err){alertBox(`${f.name}: ${err.message}`)}}
-  return}
+ if(card){attachFiles(+card.dataset.id,files);return}
  uploadMany(files)});
+// Attach files to a question (Attach files button, drop on the question, paste): each is uploaded and attached,
+// and a line for it goes into the answer box - an image for pictures, a link for other files - so your
+// answer can show or point to it. Delete the line if you don't want it in the answer.
+async function attachFiles(qid,files){
+ if(!me()){alertBox('Choose who you are next to "I am" first.');return}
+ const card=()=>document.querySelector(`.card.q[data-id="${qid}"]`),say=t=>{const m=document.querySelector(`[data-attmsg="${qid}"]`);if(m)m.textContent=t};
+ const failed=[];let done=0;lastActivity=Date.now();
+ for(const [i,f] of files.entries()){
+  if(f.size>maxMB*1048576){failed.push(`${f.name}: larger than the ${maxMB} MB limit`);continue}
+  say(files.length>1?`Attaching ${i+1} of ${files.length}: ${f.name}…`:`Attaching ${f.name}…`);
+  try{const d=await upload(f,{question:qid});done++;noteDocs([{id:d.id,title:d.title,filename:d.filename||f.name,mime:d.mime||f.type}]);
+   const c=card(),ta=c&&c.querySelector('[data-draft]');
+   if(ta){const name=f.name.replace(/[\[\]]/g,''),ins=(/^image\//.test(f.type)?`![${name}](/api/docs/${d.id}/view)`:`[${name}](/api/docs/${d.id}/view)`)+'\n';
+    const a=ta.selectionStart??ta.value.length,b=ta.selectionEnd??a;
+    ta.setRangeText((a>0&&ta.value[a-1]!=='\n'?'\n':'')+ins,a,b,'end');lastActivity=Date.now();draftSet('a'+qid,ta.value)}
+  }catch(err){failed.push(`${f.name}: ${err.message}`)}}
+ say(done?`${done} file${done===1?'':'s'} attached.`:'');setTimeout(()=>say(''),4000);
+ if(failed.length)alertBox('Not attached: '+failed.join('; '));
+ const ta=card()&&card().querySelector('[data-draft]');if(ta)ta.focus();
+ if(!(ta&&ta.value.trim()))load()}
+$('#attfile').onchange=e=>{const files=[...e.target.files];e.target.value='';if(files.length&&attachTo)attachFiles(attachTo,files)};
+// Drop files on a question: attached to it (the whole card is the drop target)
+$('#list').addEventListener('dragover',e=>{const c=e.target.closest&&e.target.closest('.card.q[data-id]');
+ if(c&&e.dataTransfer&&[...e.dataTransfer.types].includes('Files')){e.preventDefault();
+  document.querySelectorAll('.card.q.dropover').forEach(x=>x!==c&&x.classList.remove('dropover'));c.classList.add('dropover')}});
+$('#list').addEventListener('dragleave',e=>{const c=e.target.closest&&e.target.closest('.card.q');if(c&&!c.contains(e.relatedTarget))c.classList.remove('dropover')});
+$('#list').addEventListener('drop',e=>{const c=e.target.closest&&e.target.closest('.card.q[data-id]');
+ document.querySelectorAll('.card.q.dropover').forEach(x=>x.classList.remove('dropover'));
+ if(c&&e.dataTransfer&&e.dataTransfer.files.length){e.preventDefault();
+  if(!expanded.has(+c.dataset.id)){expanded.add(+c.dataset.id);load()}
+  attachFiles(+c.dataset.id,[...e.dataTransfer.files])}});
 $('#verfile').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
  try{
-  if($('#verfile').dataset.mode==='attach'){await upload(f,{question:attachTo});load()}
-  else{await upload(f,{replace:verFor});msg(`New version of doc ${verFor} stored.`);loadDocs()}
+  await upload(f,{replace:verFor});msg(`New version of doc ${verFor} stored.`);loadDocs()
  }catch(err){view==='docs'?msg(err.message,true):alertBox(err.message)}};
 function docRow(d){
  const v=url('/api/docs/'+d.id+'/view'),dl=url('/api/docs/'+d.id+'/download');
