@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.17.0"
+VERSION = "1.18.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -235,6 +235,8 @@ class Store:
     # -- deployments: progress reports (the whole state each time; a report replaces the earlier one)
     def put_deployment(self, dep_id, state):
         state = clean_deployment(dep_id, state)
+        prev = self.deployments(dep_id=dep_id)
+        deployment_times(state, prev[0] if prev else {})
         now = time.time()
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO deployments(id, state, updated) VALUES(?,?,?)",
@@ -553,6 +555,46 @@ def clean_deployment(dep_id, state):
     return state
 
 
+def iso_now():
+    """The time now in ISO 8601 with this computer's offset, e.g. 2026-11-09T14:32:05+02:00."""
+    z = time.strftime("%z")
+    return time.strftime("%Y-%m-%dT%H:%M:%S") + (z[:3] + ":" + z[3:] if len(z) == 5 else "")
+
+
+def deployment_times(state, prev):
+    """Fill in the times a report leaves out, from the previous report or the time it arrives, so the board can
+    show when the deployment and each step started and finished, how long they took and an ETA:
+    the deployment's started (kept from the first report), updated and finished (once done or failed), and each
+    step's started (when first seen running) and finished (when first seen done or failed)."""
+    now = iso_now()
+    state["started"] = state.get("started") or prev.get("started") or now
+    state["updated"] = state.get("updated") or now
+    if state.get("status") in ("done", "failed"):
+        state["finished"] = state.get("finished") or prev.get("finished") or now
+    else:
+        state.pop("finished", None)
+    old = {x.get("id"): x for x in prev.get("steps") or [] if isinstance(x, dict) and x.get("id")}
+    last_end = state["started"]
+    for x in state.get("steps") or []:
+        if not isinstance(x, dict):
+            continue
+        p = old.get(x.get("id")) or {}
+        st = x.get("status")
+        if st in ("running", "done", "failed") and not x.get("started"):
+            # first seen running now; reported straight as done: it started when the step before it ended
+            x["started"] = p.get("started") or (now if st == "running" else last_end)
+        if st in ("done", "failed") and not x.get("finished"):
+            x["finished"] = p.get("finished") or now
+        if "estimate" in x:   # seconds the step is expected to take
+            try:
+                x["estimate"] = max(0.0, float(x["estimate"]))
+            except (TypeError, ValueError):
+                x.pop("estimate")
+        if x.get("finished"):
+            last_end = x["finished"]
+    return state
+
+
 def clean_attention(reason, url=None, code=None, by="someone"):
     """Validate a needs-attention signal: one-line reason, an optional http(s) link, an optional short code."""
     reason = " ".join(str(reason or "").split())[:200]
@@ -659,7 +701,11 @@ TOOLS = [
                        "bar at the top of every page and the full step list on the Deploys tab. Send the WHOLE "
                        "state every time (a report replaces the previous one for that deployment id), when a step "
                        "starts or finishes and when you start waiting for someone. status: running, waiting, done "
-                       "or failed. waitingFor ({reason, url, code}) raises the board's Needs-you banner and is cleared "
+                       "or failed. Times (ISO 8601 with timezone, e.g. from `date -Iseconds`): the deployment's started "
+                       "(once, kept), each step's started and finished, kept in every later report; give eta and a "
+                       "step's estimate (seconds) when you can tell, and the board shows the time left (otherwise it "
+                       "guesses from the steps done; times you leave out are filled in when the reports arrive). "
+                       "waitingFor ({reason, url, code}) raises the board's Needs-you banner and is cleared "
                        "when you send it as null. error: {step, message, log} with the full log uploaded as a "
                        "document ('doc 812').",
         "inputSchema": {
@@ -673,10 +719,13 @@ TOOLS = [
                 "questions": {"type": "array", "items": {"type": "integer"}, "description": "Board questions it ships"},
                 "branches": {"type": "array", "items": {"type": "string"}},
                 "commit": {"type": "string"},
-                "started": {"type": "string", "description": "ISO 8601 time"},
-                "updated": {"type": "string", "description": "ISO 8601 time"},
-                "steps": {"type": "array", "description": "In order: {id, label, status, finished?, detail?, "
-                          "stages?: [{name, status}]}", "items": {"type": "object"}},
+                "started": {"type": "string", "description": "ISO 8601 time the deployment began (keep it the same in every report)"},
+                "updated": {"type": "string", "description": "ISO 8601 time of this report"},
+                "finished": {"type": "string", "description": "ISO 8601 time it ended (done or failed)"},
+                "eta": {"type": "string", "description": "ISO 8601 time you expect it to finish, if you can tell"},
+                "steps": {"type": "array", "description": "In order: {id, label, status, started?, finished?, "
+                          "estimate? (seconds the step usually takes), detail?, stages?: [{name, status}]}. "
+                          "started/finished are ISO 8601 times", "items": {"type": "object"}},
                 "waitingFor": {"type": ["object", "null"], "description": "{reason, url?, code?} or null"},
                 "error": {"type": ["object", "null"], "description": "{step, message, log?} or null"},
             },
@@ -780,7 +829,8 @@ INSTRUCTIONS = (
     "Put documents the team should be able to read (specs, reports, notes, screenshots) in the document store "
     "with upload_document, and link them from questions or answers as 'doc <id>'. "
     "When you run a deployment or another long multi-step job, report it with deployment_progress (the whole "
-    "state each time a step starts or finishes) so the team can follow it on the board. "
+    "state each time a step starts or finishes, with each step's started and finished times and an eta or step "
+    "estimates when you can tell) so the team can follow it on the board. "
     "A question with status on_hold has been put on hold by the team: don't answer, chase, follow up on or ask "
     "about it (not even your own) until it is taken off hold; it is left out of your inbox until then. "
     "Posts are Markdown; to show an image (PNG, JPEG, GIF, WebP or SVG) from the document store in a post, "
@@ -1449,7 +1499,8 @@ main>section{padding-top:14px}
 .depsteps li{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:baseline}
 .depsteps .ic{text-align:center;font-weight:700}.depsteps .done .ic{color:var(--ans)}.depsteps .failed .ic{color:#e5484d}
 .depsteps .running .ic{color:var(--accent)}.depsteps .waiting{color:var(--muted)}
-.depsteps .when{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
+.depsteps .when{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.depeta{font-variant-numeric:tabular-nums}.depeta.late{color:#e5484d}
 .stages{grid-column:2/4;display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
 .stage{font-size:13px;border:1px solid var(--line);border-radius:6px;padding:1px 8px;background:var(--bg)}
 .stage.done{color:var(--ans);border-color:var(--ans)}.stage.running{color:var(--accent);border-color:var(--accent);font-weight:600}
@@ -1989,6 +2040,27 @@ let HIDDEN={};try{HIDDEN=JSON.parse(store('qa-dephidden')||'{}')||{}}catch(e){HI
 function hideDep(d){HIDDEN[d.deployment]=d.received;const k=Object.keys(HIDDEN);
  if(k.length>50)for(const x of k.slice(0,k.length-50))delete HIDDEN[x];store('qa-dephidden',JSON.stringify(HIDDEN))}
 function depTime(t){const d=t?new Date(t):null;return d&&!isNaN(d)?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}
+// times: ISO strings (or epoch seconds) -> seconds; durations as 45s, 2m 05s, 1h 04m
+function tsec(t){if(t==null||t==='')return null;const d=typeof t==='number'?new Date(t*1000):new Date(t);return isNaN(d)?null:d.getTime()/1000}
+function fdur(s){s=Math.max(0,Math.round(s));if(s<60)return s+'s';const m=Math.floor(s/60);
+ return m<60?m+'m '+String(s%60).padStart(2,'0')+'s':Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m'}
+function stepDur(x,now){const a=tsec(x.started),b=tsec(x.finished);return a==null?null:(b!=null?b:(x.status==='running'?now:null))-a}
+// elapsed time, and the time left: from the report's eta, else the steps' estimates, else (a guess) the
+// average time of the steps done so far
+function depTimes(d){const now=Date.now()/1000,st=(d.steps||[]).filter(x=>x&&typeof x==='object');
+ const start=tsec(d.started),fin=d.status==='done'||d.status==='failed'?(tsec(d.finished)||d.received):null;
+ const out={start,elapsed:start!=null?(fin||now)-start:null,finished:fin,left:null,eta:null,guess:false};
+ if(fin)return out;
+ const todo=st.filter(x=>x.status!=='done'&&x.status!=='failed');
+ if(tsec(d.eta)!=null){out.eta=tsec(d.eta);out.left=out.eta-now;return out}
+ if(todo.length&&todo.every(x=>typeof x.estimate==='number')){
+  out.left=todo.reduce((n,x)=>n+Math.max(0,x.estimate-(x.status==='running'?(stepDur(x,now)||0):0)),0)}
+ else{const durs=st.filter(x=>x.status==='done').map(x=>stepDur(x,now)).filter(v=>v!=null&&v>=0);
+  if(durs.length&&todo.length){const avg=durs.reduce((a,b)=>a+b,0)/durs.length;out.guess=true;
+   out.left=todo.reduce((n,x)=>n+(typeof x.estimate==='number'?x.estimate:avg)-(x.status==='running'?Math.min(stepDur(x,now)||0,typeof x.estimate==='number'?x.estimate:avg):0),0)}}
+ if(out.left!=null)out.eta=now+out.left;
+ return out}
+function depLeft(t){if(t.left==null)return '';return t.left<0?'overdue by '+fdur(-t.left):(t.guess?'about ':'~')+fdur(t.left)+' left'}
 function depPct(d){
  if(typeof d.progress==='number')return Math.round(d.progress*100);
  const st=(d.steps||[]).filter(x=>x&&typeof x==='object');if(!st.length)return d.status==='done'?100:0;
@@ -2006,7 +2078,7 @@ function renderDepStrip(){const act=DEPS.filter(d=>depActive(d)&&HIDDEN[d.deploy
  box.hidden=!act.length;
  box.innerHTML=act.map(d=>{const p=depPct(d);return `<button class="deprow s-${esc(d.status)}${d.waitingFor?' needs':''}" data-dep="${esc(d.deployment)}" title="Open on the Deploys tab">
   <span class="depname">${esc(d.target||d.deployment)}</span><span class="depbar"><i style="width:${p}%"></i></span>
-  <span class="deppct">${p}%</span><span class="depstep">${esc(depCur(d)||(d.status==='done'?'finished '+depTime(d.updated):''))}</span>
+  <span class="deppct">${p}%</span><span class="depstep">${esc((()=>{const t=depTimes(d),l=depLeft(t);return (depCur(d)||(d.status==='done'?'finished '+depTime(d.finished||d.updated)+(t.elapsed!=null?' · took '+fdur(t.elapsed):''):''))+(l?' · '+l:'')})())}</span>
   ${d.status==='done'||d.status==='failed'?`<span class="dstat ${depState(d)} hide" data-hide="${esc(d.deployment)}" title="Hide from the bar (still on the Deploys tab)">${esc(depLabel(d))} ✕</span>`
     :`<span class="dstat ${depState(d)}">${esc(depLabel(d))}</span>`}</button>`}).join('')}
 const ICON={done:'✓',running:'●',failed:'✕',waiting:'○'};
@@ -2014,14 +2086,19 @@ function depCard(d){const p=depPct(d),st=(d.steps||[]).filter(x=>x&&typeof x==='
  const qs=(d.questions||[]).map(n=>`<a href="#" data-goq="${+n}">#${+n}</a>`).join(' ');
  return `<div class="card depcard s-${esc(d.status)}${wf?' needs':''}${d.deployment===focusDep?' focus':''}" id="dep-${esc(d.deployment)}">
  <h3>${esc(d.target||'Deployment')} <span class="dstat ${depState(d)}">${esc(depLabel(d))}</span><span class="meta" style="font-weight:400">${esc(d.deployment)}</span></h3>
- <div class="depmeta">${d.started?`<span>started ${esc(depTime(d.started))}</span>`:''}<span>updated ${ago(d.received)}</span>
+ <div class="depmeta">${(()=>{const t=depTimes(d),l=depLeft(t);return (d.started?`<span>started ${esc(depTime(d.started))}</span>`:'')
+   +(t.elapsed!=null?`<span>${t.finished?'took':'running for'} ${esc(fdur(t.elapsed))}</span>`:'')
+   +(t.eta!=null?`<span class="depeta${t.left<0?' late':''}" title="${esc(t.guess?'A guess from the average time of the steps done so far':d.eta?'The ETA in the report':'From the steps\' estimates')}">ETA ${esc(depTime(t.eta*1000))} · ${esc(l)}</span>`:'')})()}<span>updated ${ago(d.received)}</span>
   ${d.commit?`<span>commit <code>${esc(d.commit)}</code></span>`:''}${(d.branches||[]).length?`<span>${(d.branches||[]).map(b=>`<code>${esc(b)}</code>`).join(' ')}</span>`:''}
   ${qs?`<span>questions ${qs}</span>`:''}</div>
  <div class="depbar"><i style="width:${p}%"></i></div>
  <ol class="depsteps">${st.map(x=>{const s=['done','running','failed','waiting'].includes(x.status)?x.status:'waiting';
   const sg=(x.stages||[]).filter(g=>g&&typeof g==='object');
   return `<li class="${s}"><span class="ic">${ICON[s]}</span><span>${esc(x.label||x.id||'')}${x.detail?` <span class="meta">· ${linkDocs(esc(String(x.detail)))}</span>`:''}</span>
-   <span class="when">${x.finished?esc(depTime(x.finished)):''}</span>
+   <span class="when">${esc((()=>{const now=Date.now()/1000,du=stepDur(x,now),est=typeof x.estimate==='number'?x.estimate:null;
+     if(s==='done'||s==='failed')return (x.finished?depTime(x.finished):'')+(du!=null?' · '+fdur(du):'')+(est!=null&&du!=null?' (est. '+fdur(est)+')':'');
+     if(s==='running')return (x.started?'since '+depTime(x.started):'')+(du!=null?' · '+fdur(du):'')+(est!=null?' of ~'+fdur(est):'');
+     return est!=null?'~'+fdur(est):''})())}</span>
    ${sg.length?`<div class="stages">${sg.map(g=>`<span class="stage ${['done','running','failed'].includes(g.status)?g.status:'waiting'}">${esc(g.name||'')}</span>`).join('')}</div>`:''}</li>`}).join('')}</ol>
  ${wf?`<div class="depwait"><b>Needs you:</b> ${esc(wf.reason||'')}${wf.url&&/^https?:\/\//.test(wf.url)?` · <a href="${esc(wf.url)}" target="_blank" rel="noopener noreferrer">Open link</a>`:''}${wf.code?` · code <code>${esc(wf.code)}</code>`:''}</div>`:''}
  ${er?`<div class="deperr"><b>Failed${er.step?' at '+esc(er.step):''}:</b> ${esc(er.message||'')}${er.log?` · log: ${linkDocs(esc(String(er.log)))}`:''}</div>`:''}

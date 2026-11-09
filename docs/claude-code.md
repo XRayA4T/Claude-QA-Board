@@ -50,7 +50,8 @@ ask Claude to write it after looking at how the project deploys:
 > Look at how this project is deployed and add a "Deployments" section to CLAUDE.md: the steps you
 > go through, in order (an id and a short label for each), the pipeline's stage names, and the rule
 > to report every deployment with deployment_progress (the whole state each time a step starts or
-> finishes, waitingFor when you need someone, error with the log uploaded as a board document,
+> finishes, with the deployment's started time and each step's started and finished times, and each
+> step's usual duration in seconds as its estimate, waitingFor when you need someone, error with the log uploaded as a board document,
 > done or failed at the end). Then send one report for a dry run, target "test" and status done, so
 > I can check it shows on the board's Deploys tab, and show me the section you added.
 

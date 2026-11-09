@@ -31,7 +31,10 @@ QA board with the qaboard tool deployment_progress, so the team can follow it th
 - id: dep-YYYYMMDD-HHMM (start time). Also target (e.g. www-dev), the board questions it ships,
   branches, commit, started/updated (ISO times), status (running, waiting, done, failed) and step
   (the id of the current step).
-- steps: the real steps you go through, in order, each {id, label, status, finished, detail}.
+- steps: the real steps you go through, in order, each {id, label, status, started, finished,
+  estimate, detail}. Times are ISO 8601 with the timezone (`date -Iseconds`); keep the times of steps
+  already done in every report. estimate: the seconds the step usually takes, so the board can show
+  the time left (add eta, an ISO time, when you know when it will finish).
   For a pipeline step, list the pipeline's real stage names as stages: [{name, status}].
 - Need a person (a sign-in, an approval)? Set waitingFor {reason, url, code} and status waiting:
   the board shows a "Needs you" banner. Set waitingFor back to null when you can carry on.

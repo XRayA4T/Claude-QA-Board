@@ -21,7 +21,7 @@ Every request needs the board key, as `?key=KEY` or an `X-QA-Key: KEY` header. T
 | `list_documents` | `query`, `question_id`, `include_archived`, `limit` | Lists or searches documents |
 | `get_document` | `id`, `version`, `max_chars`, `as_base64` | Details, history and content |
 | `archive_document` | `id`, `restore` | Hides or restores a document. Nothing is deleted. |
-| `deployment_progress` | `deployment`, `status`, `target`, `step`, `steps`, `progress`, `questions`, `branches`, `commit`, `started`, `updated`, `waitingFor`, `error` | Reports a deployment's whole state (see below) |
+| `deployment_progress` | `deployment`, `status`, `target`, `step`, `steps`, `progress`, `questions`, `branches`, `commit`, `started`, `updated`, `finished`, `eta`, `waitingFor`, `error` | Reports a deployment's whole state (see below) |
 | `needs_attention` | `reason`, `url`, `code` | Raises the "a person is needed" banner |
 | `attention_cleared` | — | Clears it |
 
@@ -92,11 +92,13 @@ is running, waiting, or finished in the last 15 minutes. The full step list is o
   "commit": "483302e",
   "started": "2026-11-04T09:21:40+02:00",
   "updated": "2026-11-04T09:41:12+02:00",
+  "eta": "2026-11-04T09:52:00+02:00",
   "steps": [
-    { "id": "tests",    "label": "Server tests", "status": "done", "finished": "2026-11-04T09:28:21+02:00", "detail": "756 passed" },
-    { "id": "pipeline", "label": "AWS pipeline", "status": "running",
+    { "id": "tests",    "label": "Server tests", "status": "done", "started": "2026-11-04T09:21:40+02:00",
+      "finished": "2026-11-04T09:28:21+02:00", "estimate": 420, "detail": "756 passed" },
+    { "id": "pipeline", "label": "AWS pipeline", "status": "running", "started": "2026-11-04T09:28:21+02:00", "estimate": 900,
       "stages": [ { "name": "Build", "status": "done" }, { "name": "Deploy", "status": "running" } ] },
-    { "id": "announce", "label": "Answer the questions", "status": "waiting" }
+    { "id": "announce", "label": "Answer the questions", "status": "waiting", "estimate": 60 }
   ],
   "waitingFor": null,
   "error": null
@@ -106,6 +108,16 @@ is running, waiting, or finished in the last 15 minutes. The full step list is o
 - **`status`** (for the deployment, each step and each stage): `running`, `waiting`, `done` or `failed`.
 - **`progress`** (0 to 1) is optional. Without it, the board counts finished steps, and a running
   step's stages count as fractions of that step.
+- **Times** are ISO 8601 with the timezone (`date -Iseconds`): `started` for the deployment (keep it the same in
+  every report) and each step's `started` and `finished`, kept in every later report. `finished` for the
+  deployment when it is done or failed. Times a report leaves out are filled in by the board from the
+  earlier report or the time the report arrives, so they are approximate if reports are rare.
+- **Elapsed and time left.** The Deploys tab shows when each step started or finished and how long it took
+  (or has been running), and for the deployment how long it has been running (or took) and its **ETA**.
+  The ETA is the report's `eta`, else worked out from the steps' `estimate` (seconds each step usually takes;
+  a waiting step shows it as "~2m 00s", a finished one shows it next to the time it really took), else a
+  guess from the average time of the steps done so far ("about 3m left"). The bar under the tabs shows the
+  time left too.
 - **`waitingFor`**: `{reason, url, code}`, the same as `needs_attention`. It raises the board's
   "Needs you" banner, and sending `null` clears it again.
 - **`error`**: `{step, message, log}`. Upload the full log as a document and refer to it as
