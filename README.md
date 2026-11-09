@@ -59,7 +59,8 @@ when you want to type to Claude yourself:
 | **Documents** | Upload by drag and drop, MCP or `curl`. Every version is kept; files can be archived. Markdown files open in a laid-out pop-up, HTML files as (sandboxed) pages. |
 | **Users** | People and Claudes. The "I am" picker and "For whom?" buttons put Claudes first. |
 | **Live** | A read-only mirror of the Claude Code console (ANSI colours) and a mini console in the header. A floating terminal window (ttyd) can be dragged, resized and maximised. |
-| **Deployments** | Claude (or a script) reports a deployment's steps and pipeline stages; a progress bar shows under the tabs on every page and the full step list on the Deploys tab, with "needs you" and failure details. |
+| **Deployments** | Claude (or a script) reports a deployment's steps and pipeline stages; a progress bar shows under the tabs on every page and the full step list on the Deploys tab, with when each step started and finished, how long it took, an ETA, "needs you" and failure details. |
+| **Updates itself** | Started with `--self-update` (as `deploy-board.sh` does), the board checks GitHub for a newer version every hour and shows an **update to x.y.z** button by its version, with what's new. It downloads the new version, checks it starts, keeps the old one as `qaboard.py.prev` and restarts with the new one; the board's data is kept. Re-running `deploy-board.sh` never puts an older version over a newer one (unless `--force`). |
 | **Attention** | `needs_attention` / `attention_cleared` MCP tools. The watcher also detects sign-in prompts on its own. Shown as a red banner with the link, the code and a Copy button. |
 | **MCP** | Streamable HTTP at `/mcp` for Claude Code, and a stdio bridge (`qaboard.py bridge URL`) for Claude Desktop. |
 | **Hooks** | `/api/digest` returns a plain-text inbox. A `UserPromptSubmit` hook shows it to Claude Code with every prompt. |

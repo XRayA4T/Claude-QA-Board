@@ -7,12 +7,16 @@
 #   --import-db FILE   copy an existing qaboard.db to the server (only if the server has none yet)
 #   --terminal-url URL where browsers reach this environment's web terminal, for the board's Live tab
 #                      (default: the SSH tunnel, http://127.0.0.1:TERMINAL_LOCAL_PORT)
+#   --force            send this repo's qaboard.py even if the board has updated itself to a newer one
+#
+# The board updates itself from GitHub (--self-update): an "update to x.y.z" button appears by its version
+# when there is a newer one. So this script doesn't put an older qaboard.py over a newer one unless --force.
 #
 # Settings come from config/server.env and config/envs/NAME.env. The board key is
 # config/keys/NAME.key (made on the first run). Safe to re-run: updates qaboard.py and the look,
 # keeps the board's data.
 #
-# Server layout:  <REMOTE_BASE>/NAME/board/qaboard.py   (mounted read-only into the container)
+# Server layout:  <REMOTE_BASE>/NAME/board/app/qaboard.py   (the board's code; writable, so it can update itself)
 #                 <REMOTE_BASE>/NAME/board/data/        (qaboard.db, docs/, brand/)
 # Container:      qaboard-NAME, image python:3.12-alpine, read-only root, --restart unless-stopped,
 #                 memory cap sized to MAX_DOC_MB.
@@ -20,12 +24,13 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
 parse_env_arg "$@"; set -- "${REST[@]+"${REST[@]}"}"
-IMPORT_DB=""; TERM_URL=""
+IMPORT_DB=""; TERM_URL=""; FORCE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --import-db) IMPORT_DB="${2:?}"; shift ;;
     --terminal-url) TERM_URL="${2:?}"; shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    --force) FORCE=1 ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
   esac
   shift
@@ -46,8 +51,16 @@ remote_dirs
 rsh "mkdir -p '$R_BOARD/data'"
 echo "OK. Board folder: $R_BOARD"
 
-say "Copying qaboard.py"
-rsh "cat > '$R_BOARD/qaboard.py.new' && mv '$R_BOARD/qaboard.py.new' '$R_BOARD/qaboard.py'" < "$SRC"
+rsh "mkdir -p '$R_BOARD/app'"
+LOCAL_V="$(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$SRC" | head -1)"
+REMOTE_V="$(rsh "grep -m1 '^VERSION = ' '$R_BOARD/app/qaboard.py' 2>/dev/null" | sed -n 's/^VERSION = "\(.*\)"/\1/p' || true)"
+NEWER="$(python3 -c 'import re,sys;t=lambda v:tuple(int(x) for x in re.findall(r"\d+",v)[:4]);print(int(t(sys.argv[2])>t(sys.argv[1])))' "$LOCAL_V" "${REMOTE_V:-0}")"
+if [ "$NEWER" = 1 ] && [ "$FORCE" = 0 ]; then
+  say "The board is already on $REMOTE_V (it updated itself), newer than this repo's $LOCAL_V: keeping it (--force to replace it)"
+else
+  say "Copying qaboard.py ($LOCAL_V)"
+  rsh "cat > '$R_BOARD/app/qaboard.py.new' && mv '$R_BOARD/app/qaboard.py.new' '$R_BOARD/app/qaboard.py'" < "$SRC"
+fi
 
 if [ -n "$BRAND_DIR" ]; then
   case "$BRAND_DIR" in /*) B="$BRAND_DIR" ;; *) B="$REPO/$BRAND_DIR" ;; esac
@@ -88,13 +101,13 @@ docker run -d --name $CNAME \\
   --memory $MEM --cpus 0.5 --pids-limit 128 \\
   --read-only --tmpfs /tmp \\
   -p $BOARD_PORT:8787 \\
-  -v '$R_BOARD/qaboard.py':/app/qaboard.py:ro \\
+  -v '$R_BOARD/app':/app \\
   -v '$R_BOARD/data':/data \\
   --health-cmd "python3 -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8787/health?key=$KEY', timeout=3)\"" \\
   --health-interval 30s --health-retries 3 \\
   --log-opt max-size=5m --log-opt max-file=2 \\
   $IMAGE python3 -u /app/qaboard.py serve --port 8787 --db /data/qaboard.db --max-doc-mb $MAX_DOC_MB \\
-    --name $NAME_Q --accent '$BOARD_ACCENT' --terminal-url '$TERM_URL' --key '$KEY' >/dev/null
+    --name $NAME_Q --accent '$BOARD_ACCENT' --terminal-url '$TERM_URL' --key '$KEY' --self-update >/dev/null
 EOF
 
 say "Checking it's up"

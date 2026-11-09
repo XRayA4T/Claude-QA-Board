@@ -73,6 +73,15 @@ Upload a file from a shell:
 curl --data-binary @report.pdf "http://127.0.0.1:8787/api/docs?filename=report.pdf&author=alice&key=KEY"
 ```
 
+## Updating the board
+
+| Endpoint | |
+|---|---|
+| `GET /api/board/update` (`?check=1` to ask GitHub now) | The version running, the newest on GitHub (checked at most hourly), whether an update is available, what's new, and the state of an update. |
+| `POST /api/board/update` | Update now (only with `--self-update`): download, check it compiles and starts, keep `qaboard.py.prev`, replace `qaboard.py` and exit, so the container's restart policy starts the new version. |
+
+To go back: replace `qaboard.py` with `qaboard.py.prev` (in the board's `app/` folder on the server) and restart the container.
+
 ## Deployment progress
 
 Claude (with `deployment_progress`) or a script reports a deployment by sending its **whole state**

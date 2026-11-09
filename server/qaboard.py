@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.18.0"
+VERSION = "1.19.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -1142,6 +1142,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, self._page(), "text/html")
             if path == "/health":
                 return self._json(200, {"ok": True, "version": VERSION})
+            if path == "/api/board/update":
+                return self._json(200, self.server.updater.status(q.get("check") == "1"))
             if path == "/api/questions":
                 return self._json(200, {"questions": store.list(q.get("status", "unresolved"), q.get("to"), q.get("limit", 100))})
             if path.startswith("/api/questions/"):
@@ -1192,6 +1194,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "missing or wrong key"})
         store = self.server.store
         try:
+            if path == "/api/board/update":
+                return self._json(200, {"ok": True, "update": self.server.updater.start(self._who(q))})
             if path == "/api/live":   # console snapshot from the board watcher
                 d = self._body(2 * 1024 * 1024)
                 text = str(d.get("text") or "")[-400000:]
@@ -1297,6 +1301,141 @@ def render_page(brand, accent, terminal_url=""):
                 .replace("{ACCENT}", accent))
 
 
+# --------------------------------------------------------------------------- updating itself from GitHub
+
+UPDATE_URL = "https://raw.githubusercontent.com/XRayA4T/Claude-QA-Board/main/server/qaboard.py"
+UPDATE_REPO = "XRayA4T/Claude-QA-Board"
+
+
+def version_tuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v or "")[:4])
+
+
+class Updater:
+    """The board updates itself with --self-update: it checks GitHub for a newer qaboard.py (at most hourly,
+    or when asked), and on request downloads it, checks it compiles and serves /health on a spare port, keeps
+    the old file as qaboard.py.prev, puts the new one in place and exits, so the container's restart policy
+    (or a service manager) starts the new version. The file must be writable (not a read-only mount)."""
+
+    def __init__(self, path, url=UPDATE_URL, repo=UPDATE_REPO, enabled=False):
+        self.path, self.url, self.repo, self.enabled = path, url, repo, enabled
+        self.cache, self.checked, self.state = None, 0, {"state": "idle"}
+        self.lock = threading.Lock()
+
+    def _get(self, url, limit=4 * 1024 * 1024):
+        req = urllib.request.Request(url, headers={"User-Agent": "qaboard/%s" % VERSION})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.read(limit + 1)[:limit + 1]
+
+    def status(self, force=False):
+        out = {"enabled": self.enabled, "version": VERSION, "update": self.state}
+        if not self.enabled:
+            return out
+        out["writable"] = os.access(self.path, os.W_OK) and os.access(os.path.dirname(self.path), os.W_OK)
+        out["previous"] = os.path.exists(self.path + ".prev")
+        if force or not self.cache or time.time() - self.checked > 3600:
+            info = {"checked": time.time()}
+            try:
+                src = self._get(self.url).decode("utf-8", "replace")
+                m = re.search(r'^VERSION = "([^"]+)"', src, re.M)
+                info["latest"] = m.group(1) if m else None
+            except Exception as e:   # offline, rate limited: say so, keep running
+                info["error"] = str(e)[:200]
+            if info.get("latest") and version_tuple(info["latest"]) > version_tuple(VERSION):
+                try:   # what's new: the commit messages of the versions since this one ("Board 1.18.0: ...")
+                    api = "https://api.github.com/repos/%s/commits?path=server/qaboard.py&per_page=20" % self.repo
+                    notes = []
+                    for c in json.loads(self._get(api, 1024 * 1024).decode("utf-8")):
+                        msg = (c.get("commit") or {}).get("message", "").split("\n")[0]
+                        m = re.match(r"Board (\d+(?:\.\d+)+)", msg)
+                        if m and version_tuple(m.group(1)) <= version_tuple(VERSION):
+                            break
+                        notes.append(msg[:200])
+                    info["notes"] = notes[:15]
+                except Exception:
+                    pass
+            self.cache, self.checked = info, time.time()
+        out.update(self.cache)
+        out["available"] = bool(out.get("latest")) and version_tuple(out["latest"]) > version_tuple(VERSION)
+        return out
+
+    def start(self, who):
+        if not self.enabled:
+            raise ValueError("this board doesn't update itself (start it with --self-update)")
+        with self.lock:
+            if self.state.get("state") == "running":
+                return self.state
+            self.state = {"state": "running", "by": who, "at": time.time(), "msg": "downloading"}
+        threading.Thread(target=self._update, args=(who,), daemon=True).start()
+        return self.state
+
+    def _update(self, who):
+        def fail(msg):
+            self.state = {"state": "failed", "by": who, "at": time.time(), "msg": msg}
+            sys.stderr.write("update failed: %s\n" % msg)
+        try:
+            if not (os.access(self.path, os.W_OK) and os.access(os.path.dirname(self.path), os.W_OK)):
+                return fail("qaboard.py can't be replaced here (a read-only mount?): redeploy the board instead")
+            src = self._get(self.url)
+            if len(src) > 4 * 1024 * 1024:
+                return fail("the download is too big")
+            m = re.search(rb'^VERSION = "([^"]+)"', src, re.M)
+            new_v = m.group(1).decode() if m else ""
+            if not new_v or version_tuple(new_v) <= version_tuple(VERSION):
+                return fail("GitHub has %s, not newer than %s" % (new_v or "no version", VERSION))
+            new = self.path + ".new"
+            with open(new, "wb") as f:
+                f.write(src)
+            self.state["msg"] = "testing %s" % new_v
+            import py_compile
+            import shutil
+            try:
+                py_compile.compile(new, cfile=os.path.join(tempfile.gettempdir(), "qaboard-new.pyc"), doraise=True)
+            except py_compile.PyCompileError as e:
+                os.unlink(new)
+                return fail("the new version doesn't compile: %s" % e)
+            # does it start and answer /health? (a spare port, an empty board in a temp folder)
+            tmp = tempfile.mkdtemp(prefix="qaboard-test-")
+            import socket
+            sk = socket.socket()
+            sk.bind(("127.0.0.1", 0))
+            port = sk.getsockname()[1]
+            sk.close()
+            import subprocess
+            p = subprocess.Popen([sys.executable, new, "serve", "--host", "127.0.0.1", "--port", str(port),
+                                  "--db", os.path.join(tmp, "test.db")], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.PIPE)
+            ok, err = False, ""
+            try:
+                for _ in range(40):
+                    time.sleep(0.25)
+                    if p.poll() is not None:
+                        err = (p.stderr.read() or b"").decode("utf-8", "replace")[-300:]
+                        break
+                    try:
+                        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+                                "http://127.0.0.1:%d/health" % port, timeout=2) as r:
+                            ok = json.loads(r.read().decode()).get("version") == new_v
+                            break
+                    except Exception:
+                        continue
+            finally:
+                if p.poll() is None:
+                    p.kill()
+                shutil.rmtree(tmp, ignore_errors=True)
+            if not ok:
+                os.unlink(new)
+                return fail("the new version didn't start: %s" % (err.strip().splitlines()[-1] if err.strip() else "no answer"))
+            shutil.copy2(self.path, self.path + ".prev")
+            os.replace(new, self.path)
+            self.state = {"state": "restarting", "by": who, "at": time.time(), "msg": "updated to %s" % new_v}
+            sys.stderr.write("updated to %s by %s; restarting\n" % (new_v, who))
+            time.sleep(1.5)   # let the answer reach the browser
+            os._exit(0)       # the container's restart policy starts the new version
+        except Exception as e:
+            fail("%s: %s" % (type(e).__name__, e))
+
+
 def serve(args):
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     srv.daemon_threads = True
@@ -1304,6 +1443,7 @@ def serve(args):
     srv.key = args.key
     srv.brand = args.name
     srv.accent = args.accent if re.fullmatch(r"#[0-9a-fA-F]{6}", args.accent or "") else "#3949ab"
+    srv.updater = Updater(os.path.abspath(__file__), args.update_url or UPDATE_URL, UPDATE_REPO, args.self_update)
     srv.page = render_page(srv.brand, srv.accent, args.terminal_url)
     sys.stderr.write("QA board v%s on http://%s:%d  (db: %s, docs: %s, max %s MB%s)\n" % (
         VERSION, args.host, args.port, args.db, srv.store.docdir, args.max_doc_mb,
@@ -1371,6 +1511,13 @@ h1 span{display:block;font-size:15.6px;font-weight:500;color:var(--muted);letter
 .brand{display:flex;gap:10px;align-items:center}
 .brand img{border-radius:8px;flex:0 0 auto}
 h1 .ver{font-size:13.2px;font-weight:500;letter-spacing:0;text-transform:none;opacity:.75;margin-left:4px}
+.updbtn{font:600 12px/1 system-ui,sans-serif;letter-spacing:0;text-transform:none;margin-left:6px;padding:4px 9px;border-radius:99px;
+ border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;vertical-align:2px}
+.updlg{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.45);display:grid;place-items:center;padding:16px}
+.updlg[hidden]{display:none}
+.updbox{background:var(--card);color:var(--fg,inherit);border-radius:12px;max-width:520px;width:100%;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+.updbox h3{margin:0 0 8px}.updbox ul{margin:6px 0 10px;padding-left:20px;max-height:220px;overflow:auto}
+.updbox .btns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}.updbox .bad{color:#e5484d}
 header{border-top:4px solid var(--accent);padding-top:12px}
 .me{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:16.8px}
 input,textarea,select{font:inherit;color:var(--fg);background:var(--field);border:1px solid var(--line);
@@ -2032,6 +2179,31 @@ const drop=$('#drop');
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
 drop.addEventListener('drop',e=>uploadMany([...e.dataTransfer.files]));
 let verFor=null;
+// ---- the board updating itself from GitHub (started with --self-update): an "update to x.y.z" button by the version
+let UPD=null;
+async function checkUpdate(force){try{UPD=await api('/api/board/update'+(force?'?check=1':''))}catch(e){return}renderUpd()}
+function renderUpd(){const v=document.querySelector('header .ver');if(!v||!UPD||!UPD.enabled)return;let b=$('#updbtn');
+ if(UPD.available){if(!b){b=document.createElement('button');b.id='updbtn';b.type='button';b.className='updbtn';v.after(b);b.onclick=openUpd}
+  b.textContent='update to '+UPD.latest;b.title='A newer version of the board is on GitHub'}
+ else if(b)b.remove()}
+function updBox(html){let d=$('#updlg');if(!d){d=document.createElement('div');d.id='updlg';d.className='updlg';document.body.appendChild(d);
+  d.onclick=e=>{if(e.target===d||e.target.closest('[data-updno]'))d.hidden=true}}
+ d.innerHTML='<div class="updbox" role="dialog" aria-modal="true">'+html+'</div>';d.hidden=false;return d}
+function openUpd(){const u=UPD||{};
+ const notes=(u.notes||[]).length?'<ul>'+u.notes.map(n=>'<li>'+esc(n)+'</li>').join('')+'</ul>':'';
+ const d=updBox(`<h3>Update the board to ${esc(u.latest||'')}?</h3><div>This board is ${esc(u.version||'')}. What's new:</div>${notes||'<div class="meta">(see the repository)</div>'}
+  <div class="meta">The board downloads the new version from GitHub, checks it starts, and restarts with it, which takes a few seconds; the questions, documents and settings are kept, and the old version is kept as qaboard.py.prev.</div>
+  ${u.writable===false?'<div class="bad">This board can\'t replace its own file (it is mounted read-only): redeploy it to update.</div>':''}
+  <div class="btns"><button type="button" data-updno>Not now</button><button type="button" class="primary" id="updgo"${u.writable===false?' disabled':''}>Update now</button></div>`);
+ $('#updgo').onclick=async()=>{$('#updgo').disabled=true;$('#updgo').textContent='Updating…';
+  try{await api('/api/board/update'+(me()?'?who='+encodeURIComponent(me()):''),{})}catch(e){d.querySelector('.btns').insertAdjacentHTML('beforebegin','<div class="bad">'+esc(e.message)+'</div>');return}
+  const from=u.version,t0=Date.now();
+  const poll=async()=>{if(Date.now()-t0>120000){updBox('<h3>The update didn\'t finish</h3><div>The board hasn\'t come back with the new version after two minutes. Look at its log (docker logs).</div><div class="btns"><button type="button" data-updno>Close</button></div>');return}
+   try{const r=await fetch(url('/health'),{cache:'no-store'});if(r.ok){const j=await r.json();if(j.version&&j.version!==from){location.reload();return}}
+    const st=await api('/api/board/update');if(st.update&&st.update.state==='failed'){updBox('<h3>The board wasn\'t updated</h3><div class="bad">'+esc(st.update.msg||'')+'</div><div class="meta">It is still running '+esc(from)+'.</div><div class="btns"><button type="button" data-updno>Close</button></div>');return}}catch(e){}
+   setTimeout(poll,2000)};setTimeout(poll,2000)}}
+setTimeout(()=>checkUpdate(false),1500);setInterval(()=>{if(!document.hidden)checkUpdate(false)},3600*1000);
+
 // ---- deployments: a progress bar under the tabs while one is running (or just finished), full detail on Deploys
 let DEPS=[],depTimer=null,focusDep=null;
 // Finished deployments hidden from the bar under the tabs (per browser): {id: the report time that was hidden}.
@@ -2243,6 +2415,10 @@ def main():
     s = sub.add_parser("serve", help="run the board")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8787)
+    s.add_argument("--self-update", action="store_true", help="let the board update itself from GitHub (an Update "
+                   "button when there's a newer version; qaboard.py must be writable and something must restart "
+                   "the board when it exits, e.g. docker --restart unless-stopped)")
+    s.add_argument("--update-url", default=None, help="where the newest qaboard.py is (default: the GitHub repository)")
     s.add_argument("--db", default="qaboard.db")
     s.add_argument("--key", default=None, help="optional shared secret; clients add ?key=... or X-QA-Key")
     s.add_argument("--max-doc-mb", type=float, default=20, help="largest document accepted (default 20)")
