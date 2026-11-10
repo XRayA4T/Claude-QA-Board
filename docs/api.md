@@ -21,6 +21,7 @@ Every request needs the board key, as `?key=KEY` or an `X-QA-Key: KEY` header. T
 | `list_documents` | `query`, `question_id`, `include_archived`, `limit` | Lists or searches documents |
 | `get_document` | `id`, `version`, `max_chars`, `as_base64` | Details, history and content |
 | `archive_document` | `id`, `restore` | Hides or restores a document. Nothing is deleted. |
+| `who_is_watching` | — | Who is watching the session from the board (terminal open, Live tab, on the board) and how many other terminals are attached |
 | `deployment_progress` | `deployment`, `status`, `target`, `step`, `steps`, `progress`, `questions`, `branches`, `commit`, `started`, `updated`, `finished`, `eta`, `waitingFor`, `error` | Reports a deployment's whole state (see below) |
 | `needs_attention` | `reason`, `url`, `code` | Raises the "a person is needed" banner |
 | `attention_cleared` | — | Clears it |
@@ -38,7 +39,9 @@ The exact schemas are in `TOOLS` in [`server/qaboard.py`](../server/qaboard.py).
 | `POST /api/questions` | `{"title","body","author","to"}` |
 | `POST /api/questions/ID/answers` | `{"body","author"}` |
 | `POST /api/questions/ID/status` | `{"status": "open"/"answered"/"resolved"/"on_hold"/"reopen"}`. `reopen` sets answered or open, depending on whether it has answers. |
-| `GET /api/digest?to=NAME` | Plain-text inbox, used by the Claude Code hook |
+| `GET /api/digest?to=NAME` | Plain-text inbox, used by the Claude Code hook. Ends with who is watching the session ("Watching your session now: raymond (terminal open), lorretta (Live tab)") when anyone is on the board. |
+| `GET /api/presence` | Who is on the board now: each person (by the name chosen next to "I am"), whether their terminal window is open, whether they are on the Live tab, and how many other terminals are attached to Claude's session. |
+| `POST /api/presence` | A board page checking in (every 15 s): `{id, who, view, term, hidden}`; `gone: true` when it closes. Silent for 75 s counts as gone. |
 | `GET /api/users`, `POST /api/users` | `{"name","kind": "person"/"claude"}` |
 | `POST /api/users/NAME/delete` | Removes a user |
 | `GET /api/people` | Every name the board knows |
