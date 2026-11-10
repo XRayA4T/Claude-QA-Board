@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.19.0"
+VERSION = "1.20.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -182,17 +182,28 @@ class Store:
         ]
         return q
 
-    def post(self, title, body, author, to):
+    def post(self, title, body, author, to, documents=None):
+        """documents: ids of documents uploaded while writing the question (pasted screenshots, files); those not
+        attached to a question yet are attached to this one."""
         title = (title or "").strip()
         if not title:
             raise ValueError("title is required")
         now = time.time()
+        docs = []
+        for d in documents or []:
+            try:
+                docs.append(int(d))
+            except (TypeError, ValueError):
+                pass
         with self.lock:
             cur = self.db.execute(
                 "INSERT INTO questions(title, body, author, to_whom, status, created, updated) "
                 "VALUES(?,?,?,?, 'open', ?, ?)",
                 (title, (body or "").strip(), clean_name(author), clean_name(to or "anyone"), now, now),
             )
+            for d in docs[:50]:
+                self.db.execute("UPDATE documents SET question_id=? WHERE id=? AND question_id IS NULL",
+                                (cur.lastrowid, d))
             self.db.commit()
             return self.get(cur.lastrowid)
 
@@ -1253,7 +1264,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(202)
                 return self._json(200, out)
             if path == "/api/questions":
-                return self._json(201, store.post(data.get("title"), data.get("body"), data.get("author"), data.get("to")))
+                return self._json(201, store.post(data.get("title"), data.get("body"), data.get("author"), data.get("to"),
+                                                  data.get("documents") if isinstance(data.get("documents"), list) else None))
             parts = path.split("/")
             if len(parts) == 5 and parts[1:3] == ["api", "questions"]:
                 qid = int(parts[3])
@@ -1730,9 +1742,9 @@ a{color:var(--accent)}
 <section id="v-questions">
 <details class="card new" id="newbox"><summary>Ask a question</summary>
 <div class="row"><input id="title" placeholder="Question (one line)"></div>
-<div class="row"><textarea id="qbody" placeholder="Details, context, links, code"></textarea></div>
+<div class="row"><textarea id="qbody" placeholder="Details, context, links, code. Paste a screenshot (Ctrl+V) or drop files to show them here."></textarea></div>
 <div class="drop qdropzone" id="qdrop">Drop files here, or <label style="color:var(--accent);cursor:pointer;text-decoration:underline">choose files<input type="file" id="qfile" multiple hidden></label>
-<div class="meta" id="qfilelist">They're attached to the question when you post it. You can also paste a screenshot (Ctrl+V).</div></div>
+<div class="meta" id="qfilelist">They're uploaded straight away and shown in the question where your cursor is; you can also paste a screenshot (Ctrl+V).</div></div>
 <div class="row forwhom"><span class="meta forlabel">For whom?</span><div class="topills" id="topills"></div><input type="hidden" id="to">
 <button class="primary" id="post" style="flex:0 0 auto">Post</button></div>
 <div class="warnbox" id="anywarn" hidden>
@@ -2123,21 +2135,39 @@ $('#list').onclick=async e=>{const t=e.target;
   try{await api(`/api/questions/${t.dataset.answer}/answers`,{body:ta.value,author:me()});ta.value='';draftSet('a'+t.dataset.answer,'');ta.blur();load()}catch(err){alertBox(err.message)}}
  if(t.dataset.status){const[id,s]=t.dataset.status.split(':');try{await api(`/api/questions/${id}/status`,{status:s});load()}catch(err){alertBox(err.message)}}};
 function alertBox(m){$('#perr').textContent=m;$('#newbox').open=true;setTimeout(()=>$('#perr').textContent='',4000)}
-let qFiles=[];
-function showQFiles(){$('#qfilelist').innerHTML=qFiles.length?qFiles.map((f,i)=>`${esc(f.name)} (${size(f.size)}) <a href="#" data-rmq="${i}">remove</a>`).join(' · '):'They\'re attached to the question when you post it. You can also paste a screenshot (Ctrl+V).'}
-function addQFiles(list){for(const f of list){if(f.size>maxMB*1048576){alertBox(`${f.name} is larger than the ${maxMB} MB limit.`);continue}qFiles.push(f)}showQFiles()}
-$('#qfile').onchange=e=>{addQFiles([...e.target.files]);e.target.value=''};
-$('#qfilelist').onclick=e=>{if(e.target.dataset.rmq){e.preventDefault();qFiles.splice(+e.target.dataset.rmq,1);showQFiles()}};
+// Files for a new question (paste, drop, choose files) are uploaded straight away, like an answer's, and an image
+// (or a link for other files) goes into the question where the cursor is; posting attaches them to the question.
+let qFiles=[];   // [{id, name, size, line}]
+const QHINT='They\'re uploaded straight away and shown in the question where your cursor is; you can also paste a screenshot (Ctrl+V).';
+function showQFiles(t){$('#qfilelist').innerHTML=t?esc(t):qFiles.length?qFiles.map((f,i)=>`${esc(f.name)} (${size(f.size)}) <a href="#" data-rmq="${i}">remove</a>`).join(' · '):QHINT}
+async function addQFiles(list){
+ if(!me()){alertBox('Choose who you are next to "I am" first.');return}
+ const ta=$('#qbody'),failed=[];
+ for(const [i,f] of list.entries()){
+  if(f.size>maxMB*1048576){failed.push(`${f.name}: larger than the ${maxMB} MB limit`);continue}
+  showQFiles(list.length>1?`Uploading ${i+1} of ${list.length}: ${f.name}…`:`Uploading ${f.name}…`);
+  try{const d=await upload(f);noteDocs([{id:d.id,title:d.title,filename:d.filename||f.name,mime:d.mime||f.type}]);
+   const name=f.name.replace(/[\[\]]/g,''),line=(/^image\//.test(f.type)?`![${name}](/api/docs/${d.id}/view)`:`[${name}](/api/docs/${d.id}/view)`);
+   const a=ta.selectionStart??ta.value.length,b=ta.selectionEnd??a;
+   ta.setRangeText((a>0&&ta.value[a-1]!=='\n'?'\n':'')+line+'\n',a,b,'end');draftSet('ask-body',ta.value);
+   qFiles.push({id:d.id,name:f.name,size:f.size,line})}catch(err){failed.push(`${f.name}: ${err.message}`)}}
+ showQFiles();ta.focus();
+ if(failed.length)alertBox('Not uploaded: '+failed.join('; '))}
+// the documents a new question shows or links to (also ones from a draft kept over a reload)
+function qDocIds(){const ids=new Set(qFiles.map(f=>f.id));for(const m of $('#qbody').value.matchAll(/\/api\/docs\/(\d+)\/view/g))ids.add(+m[1]);return [...ids]}
+$('#qfile').onchange=e=>{const fs=[...e.target.files];e.target.value='';if(fs.length)addQFiles(fs)};
+$('#qfilelist').onclick=async e=>{if(!e.target.dataset.rmq)return;e.preventDefault();
+ const f=qFiles.splice(+e.target.dataset.rmq,1)[0];if(!f)return;
+ const ta=$('#qbody');ta.value=ta.value.replace(f.line+'\n','').replace(f.line,'');draftSet('ask-body',ta.value);showQFiles();
+ api('/api/docs/'+f.id+'/archive',{archived:true}).catch(()=>{})};
 const qdrop=$('#newbox');
 ['dragenter','dragover'].forEach(ev=>qdrop.addEventListener(ev,e=>{if(e.dataTransfer&&[...e.dataTransfer.types].includes('Files')){e.preventDefault();$('#qdrop').classList.add('over')}}));
 ['dragleave','drop'].forEach(ev=>qdrop.addEventListener(ev,()=>$('#qdrop').classList.remove('over')));
 qdrop.addEventListener('drop',e=>{if(e.dataTransfer&&e.dataTransfer.files.length){e.preventDefault();qdrop.open=true;addQFiles([...e.dataTransfer.files])}});
 async function postQuestion(to){
  const btns=[$('#post'),$('#postany')];btns.forEach(b=>b.disabled=true);
- try{const q=await api('/api/questions',{title:$('#title').value,body:$('#qbody').value,to,author:me()});
+ try{const q=await api('/api/questions',{title:$('#title').value,body:$('#qbody').value,to,author:me(),documents:qDocIds()});
   const failed=[];
-  for(const [i,f] of qFiles.entries()){$('#qfilelist').textContent=`Attaching ${f.name} (${i+1} of ${qFiles.length})…`;
-   try{await upload(f,{question:q.id})}catch(err){failed.push(f.name+': '+err.message)}}
   qFiles=[];showQFiles();
   $('#title').value=$('#qbody').value=$('#to').value='';toTouched=false;draftSet('ask-title','');draftSet('ask-body','');$('#anywarn').hidden=true;renderToPills();
   if(failed.length)alertBox(`Question #${q.id} was posted, but these files weren't attached: ${failed.join('; ')}`);else $('#newbox').open=false;
@@ -2316,7 +2346,8 @@ document.addEventListener('click',async e=>{   // any link to a document's view:
  e.preventDefault();
  if(isMd(await docMeta(id)))openMd(id,v);else window.open(a.href,'_blank','noopener')});
 // Paste an image (e.g. a screenshot) from the clipboard:
-//  - in the Ask form: it's attached to the question when you post it
+//  - in the Ask form: it's uploaded straight away and ![…](/api/docs/ID/view) is put in the question, so it
+//    shows there; posting attaches it to the question
 //  - in an open question (its answer box): it's uploaded and attached to that question straight away,
 //    and ![…](/api/docs/ID/view) is put in the answer box so it shows in your answer
 //  - on the Documents tab: it's stored as a new document
