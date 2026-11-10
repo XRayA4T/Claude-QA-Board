@@ -69,10 +69,12 @@ services:
       WATCH_LIVE: ${WATCH_LIVE:-1}
       TERMINAL_TITLE: ${TERMINAL_TITLE:-claude ${ENV_NAME:-main}}
       TTYD_CREDENTIAL: ${TTYD_CREDENTIAL:-}
-      TZ: ${TZ:-UTC}
+      TZ: ${TZ:-UTC}                                # your timezone, e.g. Africa/Johannesburg
+      NODE_OPTIONS: ${NODE_OPTIONS:---max-old-space-size=8192}   # node's ~2 GB default heap is too small for big test suites
     volumes:
       - ${PROJECT_DIR:?set PROJECT_DIR in docker/.env}:/workspace
       - ./data/claude-home:/home/claude             # Claude's sign-in, settings, history, gh/aws config
+      - ./data/claude-tmp:/tmp                      # Claude's scratchpad (/tmp/claude-UID/...) survives restarts
       # Credentials as files, if claude.env refers to them:
       # - ~/.aws:/home/claude/.aws:ro                 # Bedrock with AWS_PROFILE
       # - ./gcp-key.json:/home/claude/gcp-key.json:ro # Vertex with GOOGLE_APPLICATION_CREDENTIALS

@@ -144,6 +144,12 @@ can Claude itself, from inside the container. Use a key meant for this use, and 
 | `WATCH`, `WATCH_POLL`, `WATCH_IDLE`, `WATCH_PROMPT_CHECK`, `WATCH_LIVE` | `1`, `5`, `20`, `1`, `1` | The board watcher ([terminal-and-watcher.md](terminal-and-watcher.md)) |
 | `WITH_CHROMIUM` | `0` | `1` adds a headless browser to the image. Rebuild after changing it. |
 | `UID`, `GID` | `1000` | Who owns files the containers write |
+| `TZ` | `UTC` | The Claude container's timezone, e.g. `Africa/Johannesburg`, so times (and the board's deployment times) are local |
+| `NODE_OPTIONS` | `--max-old-space-size=8192` | Node's heap: the ~2 GB default runs out on large test suites |
+
+**Claude's scratchpad survives restarts:** `/tmp` in the Claude container is `data/claude-tmp`, so screenshots,
+scripts, git worktrees and other work Claude keeps under `/tmp` are still there after a restart or rebuild.
+Clear old files from it now and then.
 
 **Your app's dev server:** add its port under `ports:` of the `claude` service in `compose.yaml`, for
 example `- "127.0.0.1:3000:3000"`. The dev server must listen on `0.0.0.0` inside the container.
@@ -211,16 +217,30 @@ Claude Code in it.
 #!/usr/bin/env bash
 # claude-box - run Claude Code for the current folder in a fresh container
 ENVFILE=(); [ -f "$HOME/claude-state/claude.env" ] && ENVFILE=(--env-file "$HOME/claude-state/claude.env")
+# /tmp survives restarts (Claude's scratchpad is under it); files untouched for 14 days are cleared
+mkdir -p "$HOME/claude-state/tmp" && chmod 1777 "$HOME/claude-state/tmp" 2>/dev/null
+find "$HOME/claude-state/tmp" -mindepth 1 -type f -mtime +14 -delete 2>/dev/null
+find "$HOME/claude-state/tmp" -mindepth 2 -type d -empty -delete 2>/dev/null
 exec docker run --rm -it --init \
   --name "claude-$(basename "$PWD")-$$" \
   --shm-size=2g \
   -v "$PWD:$PWD" -w "$PWD" \
   -v "$HOME/claude-state:/home/claude" \
+  -v "$HOME/claude-state/tmp:/tmp" \
+  -e TZ="${CLAUDE_TZ:-Africa/Johannesburg}" \
+  -e NODE_OPTIONS="${CLAUDE_NODE_OPTIONS:---max-old-space-size=8192}" \
   "${ENVFILE[@]}" \
   -e TERM -e COLORTERM \
   --entrypoint claude \
   qaboard-claude "$@"
 ```
+
+- **Timezone:** `TZ` gives the container local time (the image has `tzdata`), so it doesn't come back as
+  UTC after every restart. A test run that needs UTC can still set it for itself (`TZ=UTC npm test`).
+- **Node heap:** `NODE_OPTIONS` raises node's ~2 GB default heap, which large test suites run out of. The
+  container has no memory limit here, so it can use what the server has.
+- **Scratchpad:** `/tmp` is a folder on the host, so Claude's scratchpad (`/tmp/claude-UID/...`), git
+  worktrees and screenshots survive a restart. The launcher clears files older than 14 days.
 
 Anthropic settings in environment variables work the same way as in Compose: put them in
 `~/claude-state/claude.env`, in the same format as `docker/claude.env.example`. `docker run --env-file`

@@ -13,7 +13,7 @@ ENV LANG=C.UTF-8 SHELL=/bin/bash
 
 # Tools Claude Code relies on, tmux for the shared session, python3 for the board watcher
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git curl ca-certificates tmux python3 ripgrep jq less procps unzip openssh-client \
+        git curl ca-certificates tmux python3 ripgrep jq less procps unzip openssh-client tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Optional headless browser (Debian's Chromium works on amd64 and arm64)
