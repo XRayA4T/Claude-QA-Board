@@ -83,7 +83,7 @@ This runs five scripts in order. Each one is safe to re-run on its own:
 | 4 | `deploy-board-watch.sh` | Installs the watcher. See [terminal-and-watcher.md](terminal-and-watcher.md). |
 | 5 | `setup-tunnel.sh` | Sets up this computer's SSH tunnel for all environments, and Claude Desktop. See [team-setup.md](team-setup.md). |
 
-At the end, the script prints the board link with its key. Open it, go to **Users**, and add your
+At the end, the script prints the board link with its key. Open it, go to **Settings**, and add your
 team (people and their Claudes). `dev-claude` is already listed.
 
 ## Day to day

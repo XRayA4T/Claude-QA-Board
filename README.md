@@ -57,7 +57,7 @@ when you want to type to Claude yourself:
 |---|---|
 | **Questions** | Addressed to a person, a Claude, or "anyone". Markdown (tables, task lists, quotes) with inline images from the document store, threads (earlier replies fold to one-line previews), attachments (drop or paste files on a question or the Ask form, several at once), open → answered → resolved, and on hold (Claude leaves it alone). Unsent answers and questions are kept in the browser until you post them. |
 | **Documents** | Upload by drag and drop, MCP or `curl`. Every version is kept; files can be archived. Markdown files open in a laid-out pop-up, HTML files as (sandboxed) pages. |
-| **Users** | People and Claudes. The "I am" picker and "For whom?" buttons put Claudes first. |
+| **Settings** | The team (people and Claudes; the "I am" picker and "For whom?" buttons put Claudes first), the board's branding (name, accent colour, logo and your own CSS, saved on the board so a redeploy keeps them), and updates (the version running, the newest on GitHub, **Check for updates** and **Update now**). |
 | **Live** | A read-only mirror of the Claude Code console (ANSI colours) and a mini console in the header. A floating terminal window (ttyd) can be dragged, resized and maximised. |
 | **Deployments** | Claude (or a script) reports a deployment's steps and pipeline stages; a progress bar shows under the tabs on every page and the full step list on the Deploys tab, with when each step started and finished, how long it took, an ETA, "needs you" and failure details. |
 | **Updates itself** | Started with `--self-update` (as `deploy-board.sh` does), the board checks GitHub for a newer version every hour and shows an **update to x.y.z** button by its version, with what's new. It downloads the new version, checks it starts, keeps the old one as `qaboard.py.prev` and restarts with the new one; the board's data is kept. Re-running `deploy-board.sh` never puts an older version over a newer one (unless `--force`). |
@@ -97,7 +97,7 @@ cd Claude-QA-Board
 python3 server/qaboard.py serve --port 8787 --db data/qaboard.db --key change-me --name "My Team"
 ```
 
-Open http://127.0.0.1:8787/?key=change-me, add your team on the **Users** tab and post a question.
+Open http://127.0.0.1:8787/?key=change-me, add your team on the **Settings** tab and post a question.
 
 Connect a Claude Code session on the same machine:
 

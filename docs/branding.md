@@ -1,5 +1,10 @@
 # Branding
 
+**On the board itself:** the **Settings** tab sets the board's name, accent colour, a logo for the header
+(PNG, JPEG, GIF, WebP or SVG, up to 512 KB) and your own CSS. They are saved in the board's database, so
+redeploying keeps them, and they win over the settings below; **Reset to how it was started** clears them.
+The rest of this page is the setup-time way, which also covers fonts.
+
 Each board has a **name** and an **accent colour**, set with `BOARD_NAME` and `BOARD_ACCENT` in the
 env file (or `--name` and `--accent` on `qaboard.py serve`). These are used in the page title, the
 header, the buttons and the generated favicon.

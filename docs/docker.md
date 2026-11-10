@@ -65,7 +65,7 @@ Then:
 1. **Open the terminal** at <http://127.0.0.1:7681>. If Claude Code signs in from environment
    variables (next section), it's ready. Otherwise sign in the first time: it shows a link to open in
    your browser. The sign-in is saved in `data/claude-home`, so you only do this once.
-2. **Open the board** at `http://127.0.0.1:8787/?key=YOUR_KEY`, add your team on the **Users** tab,
+2. **Open the board** at `http://127.0.0.1:8787/?key=YOUR_KEY`, add your team on the **Settings** tab,
    and pick yourself next to **I am**.
 3. **Ask it something:** post a question to `dev-claude`. The watcher delivers it to Claude within a
    few seconds.

@@ -73,6 +73,14 @@ Upload a file from a shell:
 curl --data-binary @report.pdf "http://127.0.0.1:8787/api/docs?filename=report.pdf&author=alice&key=KEY"
 ```
 
+## Settings
+
+| Endpoint | |
+|---|---|
+| `GET /api/settings` | The branding set on the Settings tab (`name`, `accent`, `css`, `logo`), the board's own (`defaults`) and what is in use (`effective`). |
+| `POST /api/settings` | `{name?, accent?, css?, reset?: ["name", "accent", "css", "logo"]}`. An empty value clears that setting. |
+| `POST /api/settings/logo` | The image as the body, with its `Content-Type`; an empty body removes the logo. Served at `/brand-logo`. |
+
 ## Updating the board
 
 | Endpoint | |
