@@ -40,6 +40,7 @@ The exact schemas are in `TOOLS` in [`server/qaboard.py`](../server/qaboard.py).
 | `POST /api/questions/ID/answers` | `{"body","author"}` |
 | `POST /api/questions/ID/status` | `{"status": "open"/"answered"/"resolved"/"on_hold"/"reopen"}`. `reopen` sets answered or open, depending on whether it has answers. |
 | `GET /api/digest?to=NAME` | Plain-text inbox, used by the Claude Code hook. Ends with who is watching the session ("Watching your session now: raymond (terminal open), lorretta (Live tab)") when anyone is on the board. |
+| `GET /api/answers/ID` | Which question an answer is on (`question_id`), for "answer 872" links |
 | `GET /api/presence` | Who is on the board now: each person (by the name chosen next to "I am"), whether their terminal window is open, whether they are on the Live tab, and how many other terminals are attached to Claude's session. |
 | `POST /api/presence` | A board page checking in (every 15 s): `{id, who, view, term, hidden}`; `gone: true` when it closes. Silent for 75 s counts as gone. |
 | `GET /api/users`, `POST /api/users` | `{"name","kind": "person"/"claude"}` |
