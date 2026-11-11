@@ -24,10 +24,13 @@ One file, Python 3.8+ standard library only (no pip installs).
 import argparse
 import base64
 import hashlib
+import hmac
 import json
 import mimetypes
 import os
 import re
+import select
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -38,7 +41,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.22.0"
+VERSION = "1.23.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -1161,6 +1164,95 @@ class Handler(BaseHTTPRequestHandler):
         host = self.headers.get("Host") or "localhost"
         return "http://%s" % host
 
+    # ---- the web terminal, served through the board: /terminal/ro/ (watch) and /terminal/rw/ (type)
+    # Two ttyd's (--term-ro-port, --term-rw-port on --term-host) attach to Claude's tmux session; the board passes
+    # the page and its WebSocket through, so the browser only talks to the board, with its key. Watching needs the
+    # board's key; typing needs the admin key too (or a browser on the board's own computer). --term-credential
+    # (user:password, ttyd -c) is sent to ttyd, so ttyd can listen where other programs could reach it.
+    def _term_token(self, mode):
+        secret = (self.server.admin_key if mode == "rw" and getattr(self.server, "admin_key", "") else self.server.key) or ""
+        return hmac.new(secret.encode(), ("qaboard-term-" + mode).encode(), hashlib.sha256).hexdigest()[:32]
+
+    def _term_local(self):
+        return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+    def _terminal(self):
+        raw = urllib.parse.urlsplit(self.path)
+        parts = raw.path.split("/")
+        mode = parts[2] if len(parts) > 2 else ""
+        port = (getattr(self.server, "term_ports", None) or {}).get(mode)
+        if not port:
+            return self._send(404, "No web terminal here (install ttyd and start the portal again).", "text/plain")
+        q = {k: v[-1] for k, v in urllib.parse.parse_qs(raw.query).items()}
+        cookie = "qaboard_term_" + mode
+        jar = {}
+        for c in (self.headers.get("Cookie") or "").split(";"):
+            if "=" in c:
+                k, v = c.strip().split("=", 1)
+                jar[k] = v
+        token = self._term_token(mode)
+        by_cookie = hmac.compare_digest(jar.get(cookie, ""), token)
+        admin_ok = bool(self.server.admin_key) and hmac.compare_digest(q.get("admin", ""), self.server.admin_key)
+        # typing: the admin key if one is given (a wrong one is refused, even here), else only on this computer
+        by_query = self._authorized(q) and (mode == "ro" or (admin_ok if "admin" in q else self._term_local()))
+        if not (by_cookie or by_query):
+            if mode == "rw" and self._authorized(q):
+                return self._send(403, "Typing in the terminal needs the board's admin key.", "text/plain")
+            return self._send(401, "Missing or wrong key.", "text/plain")
+        # the request for ttyd, without the keys
+        rest = urllib.parse.urlencode([(k, v) for k, v in urllib.parse.parse_qsl(raw.query) if k not in ("key", "admin")])
+        upgrade = (self.headers.get("Upgrade") or "").lower() == "websocket"
+        host = getattr(self.server, "term_host", None) or "127.0.0.1"
+        lines = ["GET %s%s HTTP/1.1" % (raw.path, "?" + rest if rest else ""), "Host: %s:%d" % (host, port)]
+        for k, v in self.headers.items():
+            if k.lower() in ("host", "cookie", "connection", "keep-alive", "x-qa-key", "authorization") \
+                    or (not upgrade and k.lower() == "upgrade"):
+                continue
+            lines.append("%s: %s" % (k, v))
+        cred = getattr(self.server, "term_credential", "") or ""
+        if cred:
+            lines.append("Authorization: Basic " + base64.b64encode(cred.encode()).decode())
+        lines.append("Connection: Upgrade" if upgrade else "Connection: close")
+        try:
+            up = socket.create_connection((host, port), timeout=10)
+        except OSError:
+            return self._send(502, "The web terminal isn't running, or the board can't reach it (%s:%d)." % (host, port), "text/plain")
+        self.close_connection = True
+        try:
+            up.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1"))
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = up.recv(65536)
+                if not chunk:
+                    break
+                head += chunk
+                if len(head) > 65536:
+                    break
+            if by_query and not by_cookie and b"\r\n" in head:   # remember the browser for the page's own requests
+                first, rest_b = head.split(b"\r\n", 1)
+                head = first + ("\r\nSet-Cookie: %s=%s; Path=/terminal/%s/; HttpOnly; SameSite=Strict"
+                                % (cookie, token, mode)).encode() + b"\r\n" + rest_b
+            self.connection.sendall(head)
+            up.settimeout(None)
+            self.connection.settimeout(None)
+            socks = [self.connection, up]
+            while True:
+                r, _, _ = select.select(socks, [], [], 3600)
+                if not r:
+                    break
+                for s_ in r:
+                    data = s_.recv(65536)
+                    if not data:
+                        return
+                    (up if s_ is self.connection else self.connection).sendall(data)
+        except OSError:
+            return
+        finally:
+            try:
+                up.close()
+            except OSError:
+                pass
+
     def _favicon(self):
         base = os.path.dirname(self.server.store.docdir)
         for name, mime in FAVICON_FILES:
@@ -1275,6 +1367,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._brand_file(path[len("/brand/"):])
         if path == "/brand-logo":   # the logo set on the Settings tab (no key needed, like the favicon)
             return self._logo()
+        if path.startswith("/terminal/"):   # the web terminal through the board (takes the key or its own cookie)
+            return self._terminal()
         if not self._authorized(q):
             return self._send(401, "Missing or wrong key. Add ?key=... to the URL.", "text/plain")
         store = self.server.store
@@ -1484,7 +1578,7 @@ def zlib_crc(text):
 
 def render_page(brand, accent, terminal_url=""):
     import html
-    if terminal_url and not re.fullmatch(r"https?://[^\s<>\"']+", terminal_url):
+    if terminal_url and terminal_url != "/terminal/" and not re.fullmatch(r"https?://[^\s<>\"']+", terminal_url):
         terminal_url = ""
     return (PAGE.replace("{VERSION}", VERSION).replace("{BRAND_HTML}", html.escape(brand))
                 .replace("{TERM_JSON}", json.dumps(terminal_url).replace("<", "\\u003c"))
@@ -1636,6 +1730,11 @@ def serve(args):
     srv.brand = args.name
     srv.accent = args.accent if re.fullmatch(r"#[0-9a-fA-F]{6}", args.accent or "") else "#3949ab"
     srv.updater = Updater(os.path.abspath(__file__), args.update_url or UPDATE_URL, UPDATE_REPO, args.self_update)
+    srv.term_ports = {k: v for k, v in (("rw", args.term_rw_port), ("ro", args.term_ro_port)) if v}
+    srv.term_host, srv.term_credential = args.term_host, args.term_credential or ""
+    srv.admin_key = args.admin_key or ""
+    if srv.term_ports:   # the terminal is served by the board itself
+        args.terminal_url = "/terminal/"
     srv.cli_brand, srv.cli_accent, srv.terminal_url = srv.brand, srv.accent, args.terminal_url
     st = srv.store.settings()   # name and colour changed on the Settings tab win over --name and --accent
     srv.brand, srv.accent = st.get("name") or srv.brand, st.get("accent") or srv.accent
@@ -2153,7 +2252,31 @@ $('#newuser').onkeydown=e=>{if(e.key==='Enter')$('#adduser').click()};
 
 // ---- floating terminal window: the Claude Code web terminal (ttyd) in an iframe
 const TERM_DEFAULT={TERM_JSON};
-const termUrl=()=>store('qa-term')||TERM_DEFAULT;
+// The terminal served by the board (/terminal/): watch with the board's key, type with the admin key too.
+{const a=new URLSearchParams(location.search).get('admin');if(a)store('qa-admin',a)}
+const PROXYTERM=TERM_DEFAULT==='/terminal/';
+function boardAdmin(){return store('qa-admin')||''}
+function proxyTermUrl(){const a=boardAdmin();
+ return location.origin+'/terminal/'+(a?'rw':'ro')+'/?key='+encodeURIComponent(KEY||'')+(a?'&admin='+encodeURIComponent(a):'')}
+const termUrl=()=>PROXYTERM?proxyTermUrl():(store('qa-term')||TERM_DEFAULT);
+function termBar(){const b=$('#termurl');
+ if(!PROXYTERM){b.textContent=termUrl().replace(/^https?:\/\//,'');b.title='Change the terminal\'s address';return}
+ b.textContent=boardAdmin()?'Typing to Claude · click to watch only':'Watching (read-only) · click to type';
+ b.title=boardAdmin()?'This browser can type to Claude (it has the admin key). Click to go back to watching.':'Enter the admin key to type to Claude'}
+function termReload(){termBar();$('#termnew').href=termUrl();if(!$('#termwin').hidden)$('#termframe').src=termUrl();if(typeof presence==='function')setTimeout(presence,100)}
+function termClick(){if(!PROXYTERM)return changeTermUrl();
+ if(boardAdmin()){updBox(`<h3>Watch only?</h3><div>This browser forgets the admin key and goes back to watching Claude without typing.</div>
+   <div class="btns"><button type="button" data-updno>Keep typing</button><button type="button" class="primary" id="termwo">Watch only</button></div>`);
+  $('#termwo').onclick=()=>{$('#updlg').hidden=true;try{localStorage.removeItem('qa-admin')}catch(e){}termReload()};return}
+ updBox(`<h3>Type to Claude</h3><div>Typing in the terminal needs the board's admin key. Whoever set up the board has it.</div>
+  <div class="row"><input id="termkey" placeholder="admin key" autocomplete="off"></div><div class="meta" id="termkeymsg"></div>
+  <div class="btns"><button type="button" data-updno>Cancel</button><button type="button" class="primary" id="termkeygo">Type</button></div>`);
+ const inp=$('#termkey');const af=document.activeElement;if(af&&af.tagName==='IFRAME')af.blur();window.focus();inp.focus();setTimeout(()=>inp.focus(),50);
+ const go=async()=>{const v=inp.value.trim();if(!v){$('#termkeymsg').textContent='Enter the admin key.';return}
+  const r=await fetch('/terminal/rw/?key='+encodeURIComponent(KEY||'')+'&admin='+encodeURIComponent(v),{cache:'no-store'}).catch(()=>null);
+  if(!r||!r.ok){$('#termkeymsg').textContent=r&&r.status===403?'That isn\'t the admin key.':'The terminal didn\'t answer ('+(r?r.status:'no connection')+').';return}
+  store('qa-admin',v);$('#updlg').hidden=true;termReload()};
+ $('#termkeygo').onclick=go;inp.onkeydown=e=>{if(e.key==='Enter')go()}}
 function termGeom(){try{return JSON.parse(store('qa-termbox')||'null')}catch(e){return null}}
 function saveGeom(){const w=$('#termwin');if(w.classList.contains('max'))return;
  store('qa-termbox',JSON.stringify({l:w.offsetLeft,t:w.offsetTop,w:w.offsetWidth,h:w.offsetHeight}))}
@@ -2164,7 +2287,7 @@ function placeTerm(){const w=$('#termwin'),g=termGeom();
  w.style.top=Math.max(8,Math.min(innerHeight-60,g?g.t:Math.round((innerHeight-H)/2)))+'px'}
 function openTerm(){const w=$('#termwin');
  if(!termUrl()){changeTermUrl();if(!termUrl())return}
- if(w.hidden){placeTerm();$('#termframe').src=termUrl();$('#termurl').textContent=termUrl().replace(/^https?:\/\//,'');
+ if(w.hidden){placeTerm();$('#termframe').src=termUrl();termBar();
   $('#termnew').href=termUrl();w.hidden=false;$('#termshade').hidden=false;document.body.classList.add('termopen')}
  $('#termframe').focus()}
 function closeTerm(){$('#termframe').src='about:blank';$('#termwin').hidden=true;$('#termshade').hidden=true;document.body.classList.remove('termopen')}
@@ -2175,7 +2298,7 @@ function changeTermUrl(){const v=prompt('Address of this board\'s Claude Code te
 $('#openterm').onclick=openTerm;
 $('#termclose').onclick=closeTerm;
 $('#termmax').onclick=()=>{const w=$('#termwin');w.classList.toggle('max');$('#termmax').title=w.classList.contains('max')?'Restore':'Maximise';if(!w.classList.contains('max'))placeTerm()};
-$('#termurl').onclick=changeTermUrl;
+$('#termurl').onclick=termClick;
 $('#termbar').ondblclick=e=>{if(!e.target.closest('button,a,#termurl'))$('#termmax').click()};
 // drag by the title bar, resize from the corner (the iframe ignores the pointer meanwhile)
 let tdrag=null;
@@ -2711,6 +2834,13 @@ def main():
     s = sub.add_parser("serve", help="run the board")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8787)
+    s.add_argument("--term-rw-port", type=int, default=None, help="ttyd to type to Claude (base path /terminal/rw, "
+                   "-W): the board serves it at /terminal/rw/ to browsers with the admin key")
+    s.add_argument("--term-ro-port", type=int, default=None, help="ttyd to watch Claude (base path /terminal/ro, "
+                   "a read-only tmux client): served at /terminal/ro/ to browsers with the board's key")
+    s.add_argument("--term-host", default="127.0.0.1", help="where those ttyd's listen (e.g. 172.17.0.1 for a board in Docker)")
+    s.add_argument("--term-credential", default="", help="user:password the ttyd's were started with (ttyd -c)")
+    s.add_argument("--admin-key", default="", help="key that lets a browser type in the web terminal")
     s.add_argument("--self-update", action="store_true", help="let the board update itself from GitHub (an Update "
                    "button when there's a newer version; qaboard.py must be writable and something must restart "
                    "the board when it exits, e.g. docker --restart unless-stopped)")

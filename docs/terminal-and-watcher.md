@@ -21,6 +21,22 @@ Each viewer can change it with the link next to the button.
 
 ![The web terminal in its floating window](images/terminal.png)
 
+### Served through the board
+
+The board can serve the terminal itself, so browsers only ever talk to the board (one address, one key, no
+tunnel to the terminal's port):
+
+- Run two ttyd's next to the board, attached to Claude's tmux session: one to type
+  (`ttyd -b /terminal/rw -W -c board:SECRET tmux -L SOCK attach -t SESSION`) and one to watch
+  (`ttyd -b /terminal/ro -c board:SECRET tmux -L SOCK attach -f read-only,ignore-size -t SESSION`).
+  `-c` makes them answer only to the board.
+- Start the board with `--term-rw-port`, `--term-ro-port`, `--term-host` (where the ttyd's listen: `127.0.0.1`, or
+  the Docker bridge, `172.17.0.1`, for a board in a container), `--term-credential board:SECRET` and
+  `--admin-key KEY`.
+- **Open terminal** on the Live tab then opens `/terminal/ro/` (watching) for anyone with the board's key. To type,
+  click the terminal's bar and enter the admin key, or open the board once with `&admin=KEY`; the browser remembers
+  it. The board passes the page and its WebSocket through to the ttyd, adding the credential.
+
 ## The watcher
 
 `watcher/board-watch.py` runs on the server, one per environment, installed by

@@ -76,6 +76,13 @@ Upload a file from a shell:
 curl --data-binary @report.pdf "http://127.0.0.1:8787/api/docs?filename=report.pdf&author=alice&key=KEY"
 ```
 
+## Web terminal
+
+| Endpoint | |
+|---|---|
+| `GET /terminal/ro/…` | Claude's terminal, read-only (with `--term-ro-port`): the board's key, then a cookie for the page's own requests and WebSocket |
+| `GET /terminal/rw/…` | Claude's terminal, to type (with `--term-rw-port`): the board's key and `admin=` the admin key |
+
 ## Settings
 
 | Endpoint | |
