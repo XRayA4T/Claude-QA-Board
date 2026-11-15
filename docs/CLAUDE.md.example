@@ -26,6 +26,8 @@ use it to ask you questions, and you use it to ask them.
 ## Deployments
 Report every deployment (and any other long multi-step job: releases, migrations, data loads) on the
 QA board with the qaboard tool deployment_progress, so the team can follow it there.
+<!-- Answers: for a question that will take a while, answer at once with "Seen by dev-claude, starting now…" and
+     replace that note with the real answer with update_answer (the answer_id answer_question returns). -->
 - Send the WHOLE state each time: when the deployment starts, when each step starts or finishes,
   when you start or stop waiting for someone, and at the end. A report replaces the previous one.
 - id: dep-YYYYMMDD-HHMM (start time). Also target (e.g. www-dev), the board questions it ships,

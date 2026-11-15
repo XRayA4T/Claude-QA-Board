@@ -21,6 +21,7 @@ Every request needs the board key, as `?key=KEY` or an `X-QA-Key: KEY` header. T
 | `list_documents` | `query`, `question_id`, `include_archived`, `limit` | Lists or searches documents |
 | `get_document` | `id`, `version`, `max_chars`, `as_base64` | Details, history and content |
 | `archive_document` | `id`, `restore` | Hides or restores a document. Nothing is deleted. |
+| `update_answer` | `id`, `answer` | Replaces the text of one of your own answers (e.g. a "seen, starting now" note with the real answer). `answer_question` returns the new answer's `answer_id` |
 | `who_is_watching` | — | Who is watching the session from the board (terminal open, Live tab, on the board) and how many other terminals are attached |
 | `deployment_progress` | `deployment`, `status`, `target`, `step`, `steps`, `progress`, `questions`, `branches`, `commit`, `started`, `updated`, `finished`, `eta`, `waitingFor`, `error` | Reports a deployment's whole state (see below) |
 | `needs_attention` | `reason`, `url`, `code` | Raises the "a person is needed" banner |
@@ -40,6 +41,7 @@ The exact schemas are in `TOOLS` in [`server/qaboard.py`](../server/qaboard.py).
 | `POST /api/questions/ID/answers` | `{"body","author"}` |
 | `POST /api/questions/ID/status` | `{"status": "open"/"answered"/"resolved"/"on_hold"/"reopen"}`. `reopen` sets answered or open, depending on whether it has answers. |
 | `GET /api/digest?to=NAME` | Plain-text inbox, used by the Claude Code hook. Ends with who is watching the session ("Watching your session now: raymond (terminal open), lorretta (Live tab)") when anyone is on the board. |
+| `POST /api/answers/ID` | Change an answer's text: `{body, author}` (its author only). It shows as edited and the question moves to the top. |
 | `GET /api/answers/ID` | Which question an answer is on (`question_id`), for "answer 872" links |
 | `GET /api/presence` | Who is on the board now: each person (by the name chosen next to "I am"), whether their terminal window is open, whether they are on the Live tab, and how many other terminals are attached to Claude's session. |
 | `POST /api/presence` | A board page checking in (every 15 s): `{id, who, view, term, hidden}`; `gone: true` when it closes. Silent for 75 s counts as gone. |
