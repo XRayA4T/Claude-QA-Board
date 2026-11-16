@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.26.0"
+VERSION = "1.27.0"
 SUPPORTED_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STATUSES = ("open", "answered", "resolved", "on_hold")
 
@@ -2314,7 +2314,7 @@ async function loadLive(){
   if(!j.ts){st.textContent='Nothing yet. The live view appears when the board watcher on the server runs with --live.';box.hidden=true;return}
   st.innerHTML=(!fresh?'<b class="err">Not updating</b> (last update '+ago(j.ts)+'). The watcher may be stopped.'
    :(j.busy?'<b>Claude is working</b>':'Claude is idle')+' · screen last changed '+agoShort(changed))+(j.title?' · '+esc(j.title):'');
-  if(changed!==liveTs){liveTs=changed;const pre=$('#livepre');const atBottom=box.hidden||pre.scrollTop+pre.clientHeight>=pre.scrollHeight-30;
+  if(changed!==liveTs&&!selectingIn($('#livepre'))){liveTs=changed;const pre=$('#livepre');const atBottom=box.hidden||pre.scrollTop+pre.clientHeight>=pre.scrollHeight-30;
    box.hidden=false;pre.innerHTML=ansiToHtml(j.text||'');if(atBottom)pre.scrollTop=pre.scrollHeight}
  }catch(e){if(full)$('#livestate').textContent='Could not reach the board: '+e.message}}
 $('#livecopy').onclick=()=>{const t=$('#livecodetext').textContent;const b=$('#livecopy');
@@ -2542,7 +2542,13 @@ function mdLines(lines,opt){ // lines are already HTML-escaped; opt.doc: a Markd
  if(code!==null)out.push('<pre><code>'+code.join('\n')+'</code></pre>');
  flushP();flushL();return out.join('');
 }
+// Is the person selecting text in el (to copy it)? Then the periodic refresh leaves el alone until they stop,
+// or the selection would vanish under them.
+function selectingIn(el){const s=window.getSelection&&window.getSelection();
+ if(!el||!s||s.isCollapsed||!s.rangeCount)return false;
+ const n=s.getRangeAt(0).commonAncestorContainer;return el.contains(n.nodeType===1?n:n.parentNode)}
 async function load(){
+ if(selectingIn($('#list')))return;   // text selected in a question or answer: refresh after
  // While someone is in an answer box, hold the refresh: always if they've typed something, and for
  // 20s of no activity if it's empty. After that the list refreshes and the box gets its focus back.
  const a=document.activeElement;let refocus=null;
@@ -2813,7 +2819,7 @@ function depCard(d){const p=depPct(d),st=(d.steps||[]).filter(x=>x&&typeof x==='
  ${wf?`<div class="depwait"><b>Needs you:</b> ${esc(wf.reason||'')}${wf.url&&/^https?:\/\//.test(wf.url)?` · <a href="${esc(wf.url)}" target="_blank" rel="noopener noreferrer">Open link</a>`:''}${wf.code?` · code <code>${esc(wf.code)}</code>`:''}</div>`:''}
  ${er?`<div class="deperr"><b>Failed${er.step?' at '+esc(er.step):''}:</b> ${esc(er.message||'')}${er.log?` · log: ${linkDocs(esc(String(er.log)))}`:''}</div>`:''}
  </div>`}
-function renderDeps(){$('#deplist').innerHTML=DEPS.length?DEPS.map(depCard).join(''):'<div class="empty">No deployments yet.</div>'}
+function renderDeps(){if(selectingIn($('#deplist')))return;$('#deplist').innerHTML=DEPS.length?DEPS.map(depCard).join(''):'<div class="empty">No deployments yet.</div>'}
 async function loadDeps(){
  clearTimeout(depTimer);
  try{DEPS=(await api('/api/deployments?limit=20')).deployments||[];renderDepStrip();if(view==='deploys')renderDeps()}catch(e){}
@@ -2951,6 +2957,7 @@ let dsearchT=null;
 $('#dsearch').oninput=()=>{clearTimeout(dsearchT);dsearchT=setTimeout(loadDocs,250)};
 $('#darch').onchange=loadDocs;
 async function loadDocs(){
+ if(selectingIn($('#docs')))return;
  const a=document.activeElement;if(a&&a.closest&&a.closest('#v-docs')&&a.id!=='dsearch'&&a.value&&a.type!=='checkbox')return;
  try{const p=new URLSearchParams();const s=$('#dsearch').value.trim();if(s)p.set('q',s);if($('#darch').checked)p.set('archived','1');
   const j=await api('/api/docs?'+p);maxMB=j.max_mb||maxMB;$('#maxmb').textContent=`Up to ${maxMB} MB per file. Everyone with access to the board can open these.`;
